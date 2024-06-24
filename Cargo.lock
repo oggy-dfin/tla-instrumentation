@@ -267,15 +267,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "proc_macros"
-version = "0.1.0"
-dependencies = [
- "proc-macro2",
- "quote",
- "syn 1.0.109",
-]
-
-[[package]]
 name = "psm"
 version = "0.1.21"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -400,7 +391,18 @@ version = "0.1.0"
 dependencies = [
  "candid",
  "itertools",
+ "lazy_static",
  "serde",
+ "tla_instrumentation_proc_macros",
+]
+
+[[package]]
+name = "tla_instrumentation_proc_macros"
+version = "0.1.0"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 1.0.109",
 ]
 
 [[package]]

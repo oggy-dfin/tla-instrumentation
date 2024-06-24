@@ -1,4 +1,5 @@
 use proc_macro::TokenStream;
+use proc_macro2::TokenStream as TokenStream2;
 use quote::quote;
 use syn::{parse_macro_input, Expr, ItemFn};
 
@@ -6,7 +7,11 @@ use syn::{parse_macro_input, Expr, ItemFn};
 pub fn tla_update(attr: TokenStream, item: TokenStream) -> TokenStream {
     // Parse the input tokens of the attribute and the function
     let input_fn = parse_macro_input!(item as ItemFn);
-    let arg = parse_macro_input!(attr as Expr);
+    // let arg = parse_macro_input!(attr as Expr);
+    // Convert proc_macro::TokenStream to proc_macro2::TokenStream
+    let attr2: TokenStream2 = attr.into();
+
+    let mut modified_fn = input_fn.clone();
 
     // Deconstruct the function elements
     let ItemFn {
@@ -16,18 +21,24 @@ pub fn tla_update(attr: TokenStream, item: TokenStream) -> TokenStream {
         block,
     } = input_fn;
 
+    let mangled_name = syn::Ident::new(&format!("_tla_impl_{}", sig.ident), sig.ident.span());
+    modified_fn.sig.ident = mangled_name.clone();
+    let inputs = sig.inputs.clone();
+
     let output = quote! {
+        #modified_fn
         #(#attrs)* #vis #sig {
             // Fail the compilation if we're not in debug mode
             #[cfg(not(debug_assertions))]
             let i:u32 = "abc";
-            with_tla_state(|state| {
-                tla_instrumentation::log_method_call!(state, #arg, crate::tla::get_tla_globals);
-            });
-            #block
-            with_tla_state(|state| {
-                tla_instrumentation::log_method_return!(state);
-            });
+
+            let body = || {
+                #block
+            };
+            tla_instrumentation::tla_log_method_call!(#attr2);
+            let res = body();
+            tla_instrumentation::tla_log_method_return!();
+            res
         }
     };
 

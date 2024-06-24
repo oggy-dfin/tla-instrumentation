@@ -5,6 +5,8 @@ use std::{
     mem,
 };
 
+use candid::de;
+use tla_value::ToTla;
 use tla_value::*;
 
 static mut TLA: Vec<u32> = Vec::new();
@@ -13,8 +15,8 @@ pub fn tla_mut() -> &'static mut Vec<u32> {
     unsafe { &mut TLA }
 }
 
-#[derive(Clone)]
-pub struct VarAssignment(BTreeMap<String, TlaValue>);
+#[derive(Clone, Debug)]
+pub struct VarAssignment(pub BTreeMap<String, TlaValue>);
 
 impl VarAssignment {
     pub fn new() -> Self {
@@ -27,6 +29,10 @@ impl VarAssignment {
         VarAssignment(new_locals)
     }
 
+    pub fn add(&mut self, name: &str, value: TlaValue) {
+        self.0.insert(name.to_string(), value);
+    }
+
     pub fn merge(&self, other: VarAssignment) -> VarAssignment {
         let mut new_locals = self.0.clone();
         new_locals.extend(other.0);
@@ -34,11 +40,11 @@ impl VarAssignment {
     }
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct Label(String);
 
 impl Label {
-    fn new(name: &str) -> Self {
+    pub fn new(name: &str) -> Self {
         Self(name.to_string())
     }
 
@@ -47,28 +53,32 @@ impl Label {
     }
 }
 
+#[derive(Debug)]
 pub struct Function {
     // TODO: do we want checks that only declared variables are set?
     // vars: BTreeSet<String>,
-    default_start_locals: VarAssignment,
-    default_end_locals: VarAssignment,
+    pub default_start_locals: VarAssignment,
+    pub default_end_locals: VarAssignment,
     // Only for top-level methods
-    start_end_labels: Option<(Label, Label)>,
+    pub start_end_labels: Option<(Label, Label)>,
     // TODO: do we want checks that all labels come from an allowed set?
     // labels: BTreeSet<Label>,
 }
 
+#[derive(Debug)]
 struct StackElem {
     function: Function,
     label: Option<Label>,
     locals: VarAssignment,
 }
 
+#[derive(Debug)]
 struct CallStack(Vec<StackElem>);
 
+#[derive(Debug)]
 pub struct LocalState {
-    locals: VarAssignment,
-    label: Label,
+    pub locals: VarAssignment,
+    pub label: Label,
 }
 
 impl CallStack {
@@ -129,137 +139,250 @@ impl CallStack {
     }
 }
 
+#[derive(Debug)]
 pub struct GlobalState(VarAssignment);
 
+impl GlobalState {
+    pub fn new() -> Self {
+        Self(VarAssignment::new())
+    }
+}
+
+#[derive(Debug)]
 pub struct Destination(String);
+
+impl Destination {
+    pub fn new(name: &str) -> Self {
+        Self(name.to_string())
+    }
+}
+#[derive(Debug)]
 pub struct RequestBuffer {
     to: Destination,
     message: TlaValue,
 }
 
+#[derive(Debug)]
 pub struct ResponseBuffer {
     from: Destination,
     message: TlaValue,
 }
 
+#[derive(Debug)]
 pub struct StartState {
     pub global: GlobalState,
     pub local: LocalState,
     pub responses: Vec<ResponseBuffer>,
 }
 
-struct EndState {
-    global: GlobalState,
-    local: LocalState,
-    requests: Vec<RequestBuffer>,
+#[derive(Debug)]
+pub struct EndState {
+    pub global: GlobalState,
+    pub local: LocalState,
+    pub requests: Vec<RequestBuffer>,
 }
 
-struct StatePair {
-    start: StartState,
-    end: EndState,
+#[derive(Debug)]
+pub struct StatePair {
+    pub start: StartState,
+    pub end: EndState,
 }
 
+#[derive(Debug)]
 enum Stage {
     Start,
     End(StartState),
+}
+
+#[derive(Debug)]
+pub struct InstrumentationState {
+    call_stack: CallStack,
+    stage: Stage,
+}
+
+impl InstrumentationState {
+    pub fn new() -> Self {
+        Self {
+            call_stack: CallStack::new(),
+            stage: Stage::Start,
+        }
+    }
 }
 
 thread_local! {
     static TLA_CALL_STACK: RefCell<CallStack> = RefCell::new(CallStack::new());
     static TLA_STAGE: RefCell<Stage> = RefCell::new(Stage::Start);
     static TLA_STATES: RefCell<Vec<StatePair>> = RefCell::new(Vec::new());
-    static TLA_RESPONSE : RefCell<Option<ResponseBuffer>> = RefCell::new(None);
 }
 
-pub fn log_start_locals(locals: VarAssignment) {
+pub fn log_locals(state: &mut InstrumentationState, locals: Vec<(&str, TlaValue)>) {
+    let mut assignment = VarAssignment::new();
+    for (name, value) in locals {
+        assignment.add(name, value);
+    }
+    state.call_stack.log_locals(assignment);
+}
+
+pub fn log_tla_request<F>(
+    state: &mut InstrumentationState,
+    to: Destination,
+    message: TlaValue,
+    get_globals: F,
+) -> StatePair
+where
+    F: FnOnce() -> GlobalState,
+{
+    let global = get_globals();
+    let old_stage = mem::replace(&mut state.stage, Stage::Start);
+    let start_state = match old_stage {
+        Stage::End(start) => start,
+        _ => panic!(
+            "Issuing request {} to {}, but stage is start",
+            message, to.0
+        ),
+    };
+    StatePair {
+        start: start_state,
+        end: EndState {
+            global,
+            local: state.call_stack.get_state(),
+            requests: vec![RequestBuffer { to, message }],
+        },
+    }
+}
+
+pub fn log_tla_response<F>(
+    state: &mut InstrumentationState,
+    from: Destination,
+    message: TlaValue,
+    get_globals: F,
+) where
+    F: FnOnce() -> GlobalState,
+{
+    let local = state.call_stack.get_state();
+    let global = get_globals();
+    let stage = &mut state.stage;
     assert!(
-        TLA_STAGE.with_borrow(|stage| matches!(*stage, Stage::Start)),
-        "Logging start locals in end stage"
+        matches!(stage, Stage::Start),
+        "Receiving response {} from {} in end stage",
+        message,
+        from.0
     );
-    TLA_CALL_STACK.with_borrow_mut(|stack| {
-        stack.log_locals(locals);
-    })
+    *stage = Stage::End(StartState {
+        global,
+        local,
+        responses: vec![ResponseBuffer { from, message }],
+    });
 }
 
-pub fn log_end_locals<F>(locals: VarAssignment, get_globals: F)
+pub fn log_fn_call(state: &mut InstrumentationState, function: Function) {
+    state.call_stack.call_function(function);
+}
+
+pub fn log_fn_return(state: &mut InstrumentationState) {
+    match state.call_stack.return_from_function() {
+        Some(_) => panic!(
+            "Seems we are left with an empty stack, but not returning from a top-level method"
+        ),
+        None => (),
+    }
+}
+
+// TODO: Does this work for modeling arguments as non-deterministically chosen locals?
+pub fn log_method_call<F>(state: &mut InstrumentationState, function: Function, get_globals: F)
 where
     F: FnOnce() -> GlobalState,
 {
-    TLA_STAGE.with(|sstage| {
-        let mut stage = sstage.borrow_mut();
-        if matches!(*stage, Stage::Start) {
-            let local = TLA_CALL_STACK.with(|stack| stack.borrow().get_state());
-            let global = get_globals();
-            TLA_RESPONSE.with(|rresp| {
-                let resp = rresp.borrow_mut().take();
-                *stage = Stage::End(StartState {
-                    local,
-                    global,
-                    responses: resp.into_iter().collect(),
-                });
+    state.call_stack.call_function(function);
+    state.stage = Stage::End(StartState {
+        global: get_globals(),
+        local: state.call_stack.get_state(),
+        responses: Vec::new(),
+    });
+}
+
+pub fn log_method_return<F>(state: &mut InstrumentationState, get_globals: F) -> StatePair
+where
+    F: FnOnce() -> GlobalState,
+{
+    let local = state
+        .call_stack
+        .return_from_function()
+        .expect("Returning from a method, but didn't end up with an empty call stack");
+
+    let start_state = match mem::replace(&mut state.stage, Stage::Start) {
+        Stage::End(start) => start,
+        _ => panic!("Returning from method, but not in an end state"),
+    };
+    StatePair {
+        start: start_state,
+        end: EndState {
+            global: get_globals(),
+            local,
+            requests: Vec::new(),
+        },
+    }
+}
+
+#[macro_export]
+macro_rules! tla_log_locals {
+    (($($name:ident : $value:expr),*)) => {
+        {
+            let mut locals = Vec::new();
+            $(
+                locals.push((stringify!($name), $value.to_tla_value()));
+            )*
+            with_tla_state(|state| {
+                $crate::log_locals(state, locals);
             });
         }
-    });
-    TLA_CALL_STACK.with(|stack| {
-        stack.borrow_mut().log_locals(locals);
-    })
+    };
 }
 
-pub fn log_tla_request<F>(to: Destination, message: TlaValue, get_globals: F)
-where
-    F: FnOnce() -> GlobalState,
-{
-    // TODO: what if we don't change any locals before issuing a request?
-    TLA_STAGE.with(|stage| {
-        assert!(
-            matches!(*stage.borrow(), Stage::End(_)),
-            "Logging request in start stage"
-        );
-    });
-    let global = get_globals();
-    TLA_STATES.with_borrow_mut(|states| {
-        TLA_STAGE.with_borrow_mut(|stage| {
-            let old_stage = mem::replace(&mut *stage, Stage::Start);
-            let start_state = match old_stage {
-                Stage::End(start) => start,
-                _ => panic!("Issuing request, but not in an end state"),
-            };
-            states.push(StatePair {
-                start: start_state,
-                end: EndState {
-                    global,
-                    local: TLA_CALL_STACK.with(|stack| stack.borrow().get_state()),
-                    requests: vec![RequestBuffer { to, message }],
-                },
+#[macro_export]
+macro_rules! tla_log_request {
+    ($to:expr, $message:expr) => {{
+        let message = $message.to_tla_value();
+
+        with_tla_state(|state| {
+            with_tla_state_pairs(|state_pairs| {
+                let new_state_pair = $crate::log_tla_request(state, $to, message, get_tla_globals);
+                state_pairs.push(new_state_pair);
             });
-        })
-    });
+        });
+    }};
 }
 
-pub fn log_tla_response<F>(from: Destination, message: TlaValue, get_globals: F)
-where
-    F: FnOnce() -> GlobalState,
-{
-    TLA_STAGE.with_borrow_mut(|stage| {
-        *stage = Stage::Start;
-    });
-    let global = get_globals();
-    TLA_RESPONSE.with(|resp| {
-        resp.borrow_mut().replace(ResponseBuffer { from, message });
-    });
+#[macro_export]
+macro_rules! tla_log_response {
+    ($from:expr, $message:expr) => {{
+        let message = $message.to_tla_value();
+        with_tla_state(|state| {
+            $crate::log_tla_response(state, $from, message, get_tla_globals);
+        });
+    }};
 }
 
-pub fn log_fn_call<F>(function: Function) {
-    TLA_CALL_STACK.with_borrow_mut(|stack| {
-        stack.call_function(function);
-    });
+#[macro_export]
+macro_rules! tla_log_method_call {
+    ($function:expr) => {{
+        println!("Logging method call");
+        with_tla_state(|state| {
+            $crate::log_method_call(state, $function, get_tla_globals);
+        });
+        println!("Finished logging method call");
+    }};
 }
 
-pub fn log_fn_return() {
-    TLA_CALL_STACK.with_borrow_mut(|stack| {
-        stack.return_from_function();
-        if stack.0.is_empty() {
-            TLA_STATES.with_borrow_mut(|states| TLA_STAGE.with_borrow_mut(f));
-        }
-    });
+#[macro_export]
+macro_rules! tla_log_method_return {
+    () => {{
+        println!("Logging method return");
+        with_tla_state(|state| {
+            with_tla_state_pairs(|state_pairs| {
+                let state_pair = $crate::log_method_return(state, get_tla_globals);
+                state_pairs.push(state_pair);
+            });
+        });
+    }};
 }
