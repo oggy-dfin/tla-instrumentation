@@ -3,6 +3,7 @@ use proc_macro2::TokenStream as TokenStream2;
 use quote::quote;
 use syn::{parse_macro_input, Expr, ItemFn};
 
+/// Used to annotate top-level methods (which de-facto start an update call)
 #[proc_macro_attribute]
 pub fn tla_update(attr: TokenStream, item: TokenStream) -> TokenStream {
     // Parse the input tokens of the attribute and the function

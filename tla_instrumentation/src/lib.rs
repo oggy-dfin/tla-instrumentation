@@ -312,6 +312,13 @@ where
     }
 }
 
+/// Logs the value of local variables at the end of the current message handler.
+/// This might be called multiple times in a single message handler, in particular
+/// if the message handler is implemented through several functions, each of which
+/// has local variables that are reflected in the TLA model.
+/// It assumes that there is a function:
+/// `with_tla_state<F>(f: F) where F: FnOnce(&mut InstrumentationState) -> ()`
+/// in scope (typically providing a way to mutate some global canister variable).
 #[macro_export]
 macro_rules! tla_log_locals {
     (($($name:ident : $value:expr),*)) => {
@@ -327,6 +334,11 @@ macro_rules! tla_log_locals {
     };
 }
 
+/// Logs the sending of a request (ending a message handler).
+/// It assumes that there are the following three functions in scope:
+/// 1. `get_tla_globals() -> GlobalState
+/// 2. `with_tla_state<F>(f: F) where F: FnOnce(&mut InstrumentationState) -> ()
+/// 3. `with_tla_state_pairs<F>(f: F) where F: FnOnce(&mut Vec<StatePair>) -> ()
 #[macro_export]
 macro_rules! tla_log_request {
     ($to:expr, $message:expr) => {{
@@ -341,6 +353,10 @@ macro_rules! tla_log_request {
     }};
 }
 
+/// Logs the receipt of a response (that starts a new message handler).
+/// It assumes that there are the following two functions in scope:
+/// 1. `get_tla_globals() -> GlobalState`
+/// 2. with_tla_state<F>(f: F) where F: FnOnce(&mut InstrumentationState) -> ()
 #[macro_export]
 macro_rules! tla_log_response {
     ($from:expr, $message:expr) => {{
@@ -351,6 +367,12 @@ macro_rules! tla_log_response {
     }};
 }
 
+/// Logs the start of a method (top-level update)
+/// It assumes that there are the following two functions in scope:
+/// 1. `get_tla_globals() -> GlobalState`
+/// 2. with_tla_state<F>(f: F) where F: FnOnce(&mut InstrumentationState) -> ()
+/// This macro is normally not called directly; rather, the attribute proc macro tla_update
+/// is used instead.
 #[macro_export]
 macro_rules! tla_log_method_call {
     ($function:expr) => {{
@@ -362,6 +384,13 @@ macro_rules! tla_log_method_call {
     }};
 }
 
+/// Logs the start of a method (top-level update)
+/// This assumes that there are the following three functions in scope:
+/// 1. `get_tla_globals() -> GlobalState`
+/// 2. `with_tla_state<F>(f: F) where F: FnOnce(&mut InstrumentationState) -> ()`
+/// 3. `with_tla_state_pairs<F>(f: F) where F: FnOnce(&mut Vec<StatePair>) -> ()`
+/// This macro is normally not called directly; rather, the attribute proc macro tla_update
+/// is used instead.
 #[macro_export]
 macro_rules! tla_log_method_return {
     () => {{
