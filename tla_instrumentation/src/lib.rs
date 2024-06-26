@@ -1,19 +1,7 @@
 pub mod tla_value;
-use std::{
-    cell::RefCell,
-    collections::{BTreeMap, BTreeSet},
-    mem,
-};
+use std::{cell::RefCell, collections::BTreeMap, mem};
 
-use candid::de;
-use tla_value::ToTla;
 use tla_value::*;
-
-static mut TLA: Vec<u32> = Vec::new();
-
-pub fn tla_mut() -> &'static mut Vec<u32> {
-    unsafe { &mut TLA }
-}
 
 #[derive(Clone, Debug)]
 pub struct VarAssignment(pub BTreeMap<String, TlaValue>);
@@ -140,7 +128,7 @@ impl CallStack {
 }
 
 #[derive(Debug)]
-pub struct GlobalState(VarAssignment);
+pub struct GlobalState(pub VarAssignment);
 
 impl GlobalState {
     pub fn new() -> Self {
@@ -158,14 +146,14 @@ impl Destination {
 }
 #[derive(Debug)]
 pub struct RequestBuffer {
-    to: Destination,
-    message: TlaValue,
+    pub to: Destination,
+    pub message: TlaValue,
 }
 
 #[derive(Debug)]
 pub struct ResponseBuffer {
-    from: Destination,
-    message: TlaValue,
+    pub from: Destination,
+    pub message: TlaValue,
 }
 
 #[derive(Debug)]

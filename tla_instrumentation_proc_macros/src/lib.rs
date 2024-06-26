@@ -23,7 +23,6 @@ pub fn tla_update(attr: TokenStream, item: TokenStream) -> TokenStream {
 
     let mangled_name = syn::Ident::new(&format!("_tla_impl_{}", sig.ident), sig.ident.span());
     modified_fn.sig.ident = mangled_name.clone();
-    let inputs = sig.inputs.clone();
 
     let output = quote! {
         #modified_fn

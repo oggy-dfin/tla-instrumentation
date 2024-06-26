@@ -64,7 +64,7 @@ use tla_stuff::{
 fn my_f() {
     tla_log_locals!((x : 1_u64));
     tla_log_request!(Destination::new("Destination"), 1_u64);
-    tla_log_response!(Destination::new("Destination"), 1_u64);
+    tla_log_response!(Destination::new("Destination"), 2_u64);
 }
 
 #[test]
@@ -85,5 +85,12 @@ fn basic_test() {
             first.end.local.locals.0.get("x"),
             Some(&1_u64.to_tla_value())
         );
+        assert_eq!(first.end.requests[0].message, 1_u64.to_tla_value());
+        let second = &pairs[1];
+        assert_eq!(
+            second.start.local.locals.0.get("x"),
+            Some(&1_u64.to_tla_value())
+        );
+        assert_eq!(second.start.responses[0].message, 2_u64.to_tla_value());
     })
 }
