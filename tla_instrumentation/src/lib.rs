@@ -1,3 +1,4 @@
+pub mod checker;
 pub mod tla_value;
 use std::{collections::BTreeMap, mem};
 
