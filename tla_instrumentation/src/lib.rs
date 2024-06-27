@@ -1,5 +1,5 @@
 pub mod tla_value;
-use std::{cell::RefCell, collections::BTreeMap, mem};
+use std::{collections::BTreeMap, mem};
 
 use tla_value::*;
 
@@ -42,26 +42,47 @@ impl Label {
 }
 
 #[derive(Debug)]
-pub struct Function {
+pub struct Update {
     // TODO: do we want checks that only declared variables are set?
     // vars: BTreeSet<String>,
     pub default_start_locals: VarAssignment,
     pub default_end_locals: VarAssignment,
     // Only for top-level methods
-    pub start_end_labels: Option<(Label, Label)>,
+    pub start_label: Label,
+    pub end_label: Label,
     // TODO: do we want checks that all labels come from an allowed set?
     // labels: BTreeSet<Label>,
 }
 
 #[derive(Debug)]
-struct StackElem {
-    function: Function,
-    label: Option<Label>,
-    locals: VarAssignment,
+enum LocationStackElem {
+    Label(Label),
+    Placeholder,
+}
+#[derive(Debug)]
+struct LocationStack(Vec<LocationStackElem>);
+
+impl LocationStack {
+    pub fn merge_labels(&self) -> Label {
+        let mut label = Label::new("");
+        for elem in self.0.iter() {
+            match elem {
+                LocationStackElem::Label(l) => label = label.merge(l),
+                LocationStackElem::Placeholder => {
+                    panic!("Placeholder found in the location stack while trying to merge labels")
+                }
+            }
+        }
+        label
+    }
 }
 
 #[derive(Debug)]
-struct CallStack(Vec<StackElem>);
+struct Context {
+    update: Update,
+    locals: VarAssignment,
+    location: LocationStack,
+}
 
 #[derive(Debug)]
 pub struct LocalState {
@@ -69,61 +90,44 @@ pub struct LocalState {
     pub label: Label,
 }
 
-impl CallStack {
-    fn new() -> Self {
-        Self(Vec::new())
-    }
-
-    fn call_function(&mut self, function: Function) {
-        assert!(
-            function.start_end_labels.is_none() || self.0.is_empty(),
-            "Calling a top-level function"
-        );
-        let locals = function.default_start_locals.clone();
-        let label = function.start_end_labels.clone().map(|(start, _)| start);
-        self.0.push(StackElem {
-            function,
-            label,
+impl Context {
+    fn new(update: Update) -> Self {
+        let location = LocationStack(vec![LocationStackElem::Label(update.start_label.clone())]);
+        let locals = update.default_start_locals.clone();
+        Self {
+            update,
             locals,
-        });
+            location,
+        }
     }
 
-    fn return_from_function(&mut self) -> Option<LocalState> {
-        let f = self.0.pop().expect("No function in call stack");
-        match f.function.start_end_labels {
-            Some((_, end)) => {
-                let locals = f.function.default_end_locals.clone();
-                // TODO: do we really want to overwrite all the current values? I guess it's fine
-                Some(LocalState { locals, label: end })
-            }
-            None => None,
+    fn call_function(&mut self) {
+        self.location.0.push(LocationStackElem::Placeholder);
+    }
+
+    fn return_from_function(&mut self) -> () {
+        let _f = self.location.0.pop().expect("No function in call stack");
+    }
+
+    fn end_update(&mut self) -> LocalState {
+        LocalState {
+            // TODO: do we really want to overwrite all the current values? I guess it's fine
+            locals: self.update.default_end_locals.clone(),
+            label: self.update.end_label.clone(),
         }
     }
 
     fn get_state(&self) -> LocalState {
-        let elem = self.0.first().expect("No function in call stack");
-        let mut state = LocalState {
-            locals: elem.locals.clone(),
-            label: elem
-                .label
-                .clone()
-                .expect("No label at the start of the call stack"),
-        };
-        self.0.iter().skip(1).for_each(|elem| {
-            state.locals = state.locals.merge(elem.locals.clone());
-            state.label = state.label.merge(
-                elem.label
-                    .as_ref()
-                    .expect("No label in the middle of the call stack"),
-            );
-        });
-        state
+        let label = self.location.merge_labels();
+        LocalState {
+            locals: self.locals.clone(),
+            label,
+        }
     }
 
     // TODO: handle passing &mut locals to called functions somehow; what if they're called differently?
     fn log_locals(&mut self, locals: VarAssignment) {
-        let elem = self.0.last_mut().expect("No function in call stack");
-        elem.locals = elem.locals.merge(locals);
+        self.locals = self.locals.merge(locals);
     }
 }
 
@@ -184,23 +188,23 @@ enum Stage {
 
 #[derive(Debug)]
 pub struct InstrumentationState {
-    call_stack: CallStack,
+    context: Context,
     stage: Stage,
 }
 
 impl InstrumentationState {
-    pub fn new() -> Self {
+    pub fn new(update: Update, global: GlobalState) -> Self {
+        let locals = update.default_start_locals.clone();
+        let label = update.start_label.clone();
         Self {
-            call_stack: CallStack::new(),
-            stage: Stage::Start,
+            context: Context::new(update),
+            stage: Stage::End(StartState {
+                global,
+                local: LocalState { locals, label },
+                responses: Vec::new(),
+            }),
         }
     }
-}
-
-thread_local! {
-    static TLA_CALL_STACK: RefCell<CallStack> = RefCell::new(CallStack::new());
-    static TLA_STAGE: RefCell<Stage> = RefCell::new(Stage::Start);
-    static TLA_STATES: RefCell<Vec<StatePair>> = RefCell::new(Vec::new());
 }
 
 pub fn log_locals(state: &mut InstrumentationState, locals: Vec<(&str, TlaValue)>) {
@@ -208,7 +212,7 @@ pub fn log_locals(state: &mut InstrumentationState, locals: Vec<(&str, TlaValue)
     for (name, value) in locals {
         assignment.add(name, value);
     }
-    state.call_stack.log_locals(assignment);
+    state.context.log_locals(assignment);
 }
 
 pub fn log_tla_request<F>(
@@ -233,7 +237,7 @@ where
         start: start_state,
         end: EndState {
             global,
-            local: state.call_stack.get_state(),
+            local: state.context.get_state(),
             requests: vec![RequestBuffer { to, message }],
         },
     }
@@ -247,7 +251,7 @@ pub fn log_tla_response<F>(
 ) where
     F: FnOnce() -> GlobalState,
 {
-    let local = state.call_stack.get_state();
+    let local = state.context.get_state();
     let global = get_globals();
     let stage = &mut state.stage;
     assert!(
@@ -263,40 +267,27 @@ pub fn log_tla_response<F>(
     });
 }
 
-pub fn log_fn_call(state: &mut InstrumentationState, function: Function) {
-    state.call_stack.call_function(function);
+pub fn log_fn_call(state: &mut InstrumentationState) {
+    state.context.call_function();
 }
 
 pub fn log_fn_return(state: &mut InstrumentationState) {
-    match state.call_stack.return_from_function() {
-        Some(_) => panic!(
-            "Seems we are left with an empty stack, but not returning from a top-level method"
-        ),
-        None => (),
-    }
+    state.context.return_from_function()
 }
 
 // TODO: Does this work for modeling arguments as non-deterministically chosen locals?
-pub fn log_method_call<F>(state: &mut InstrumentationState, function: Function, get_globals: F)
+pub fn log_method_call<F>(function: Update, get_globals: F) -> InstrumentationState
 where
     F: FnOnce() -> GlobalState,
 {
-    state.call_stack.call_function(function);
-    state.stage = Stage::End(StartState {
-        global: get_globals(),
-        local: state.call_stack.get_state(),
-        responses: Vec::new(),
-    });
+    InstrumentationState::new(function, get_globals())
 }
 
 pub fn log_method_return<F>(state: &mut InstrumentationState, get_globals: F) -> StatePair
 where
     F: FnOnce() -> GlobalState,
 {
-    let local = state
-        .call_stack
-        .return_from_function()
-        .expect("Returning from a method, but didn't end up with an empty call stack");
+    let local = state.context.end_update();
 
     let start_state = match mem::replace(&mut state.stage, Stage::Start) {
         Stage::End(start) => start,
@@ -375,12 +366,8 @@ macro_rules! tla_log_response {
 /// is used instead.
 #[macro_export]
 macro_rules! tla_log_method_call {
-    ($function:expr) => {{
-        println!("Logging method call");
-        with_tla_state(|state| {
-            $crate::log_method_call(state, $function, get_tla_globals);
-        });
-        println!("Finished logging method call");
+    ($update:expr) => {{
+        init_tla_state($crate::log_method_call($update, get_tla_globals))
     }};
 }
 
