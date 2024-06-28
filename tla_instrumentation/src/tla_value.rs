@@ -50,24 +50,6 @@ impl Display for TlaValue {
 }
 
 #[derive(Clone, Hash, PartialEq, Eq, PartialOrd, Ord, CandidType, Deserialize)]
-pub struct TlaState {
-    pub variables: BTreeMap<String, TlaValue>,
-}
-
-impl TlaState {
-    pub fn extend(&mut self, other: &mut TlaState) {
-        assert!(
-            self.variables
-                .keys()
-                .collect::<BTreeSet<_>>()
-                .is_disjoint(&other.variables.keys().collect()),
-            "The states have non-disjoint sets of keys"
-        );
-        self.variables.append(&mut other.variables);
-    }
-}
-
-#[derive(Clone, Hash, PartialEq, Eq, PartialOrd, Ord, CandidType, Deserialize)]
 pub struct TlaConstantAssignment {
     pub constants: BTreeMap<String, TlaValue>,
 }

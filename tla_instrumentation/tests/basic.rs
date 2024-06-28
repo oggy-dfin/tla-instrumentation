@@ -60,6 +60,7 @@ mod tla_stuff {
             default_end_locals: VarAssignment::new(),
             start_label: Label::new("Start_Label"),
             end_label: Label::new("End_Label"),
+            process_id: "My_F_PID".to_string(),
         }
     }
 }

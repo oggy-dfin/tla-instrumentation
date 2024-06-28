@@ -1,46 +1,10 @@
 pub mod checker;
+pub mod tla_state;
 pub mod tla_value;
-use std::{collections::BTreeMap, mem};
+use std::mem;
 
-use tla_value::*;
-
-#[derive(Clone, Debug)]
-pub struct VarAssignment(pub BTreeMap<String, TlaValue>);
-
-impl VarAssignment {
-    pub fn new() -> Self {
-        Self(BTreeMap::new())
-    }
-
-    pub fn update(&self, locals: Vec<(String, TlaValue)>) -> VarAssignment {
-        let mut new_locals = self.0.clone();
-        new_locals.extend(locals);
-        VarAssignment(new_locals)
-    }
-
-    pub fn add(&mut self, name: &str, value: TlaValue) {
-        self.0.insert(name.to_string(), value);
-    }
-
-    pub fn merge(&self, other: VarAssignment) -> VarAssignment {
-        let mut new_locals = self.0.clone();
-        new_locals.extend(other.0);
-        VarAssignment(new_locals)
-    }
-}
-
-#[derive(Clone, Debug)]
-pub struct Label(String);
-
-impl Label {
-    pub fn new(name: &str) -> Self {
-        Self(name.to_string())
-    }
-
-    fn merge(&self, other: &Label) -> Label {
-        Label(format!("{}_{}", self.0, other.0))
-    }
-}
+pub use tla_state::*;
+pub use tla_value::*;
 
 #[derive(Debug)]
 pub struct Update {
@@ -53,6 +17,7 @@ pub struct Update {
     pub end_label: Label,
     // TODO: do we want checks that all labels come from an allowed set?
     // labels: BTreeSet<Label>,
+    pub process_id: String,
 }
 
 #[derive(Debug)]
@@ -83,12 +48,6 @@ struct Context {
     update: Update,
     locals: VarAssignment,
     location: LocationStack,
-}
-
-#[derive(Debug)]
-pub struct LocalState {
-    pub locals: VarAssignment,
-    pub label: Label,
 }
 
 impl Context {
@@ -130,55 +89,6 @@ impl Context {
     fn log_locals(&mut self, locals: VarAssignment) {
         self.locals = self.locals.merge(locals);
     }
-}
-
-#[derive(Debug)]
-pub struct GlobalState(pub VarAssignment);
-
-impl GlobalState {
-    pub fn new() -> Self {
-        Self(VarAssignment::new())
-    }
-}
-
-#[derive(Debug)]
-pub struct Destination(String);
-
-impl Destination {
-    pub fn new(name: &str) -> Self {
-        Self(name.to_string())
-    }
-}
-#[derive(Debug)]
-pub struct RequestBuffer {
-    pub to: Destination,
-    pub message: TlaValue,
-}
-
-#[derive(Debug)]
-pub struct ResponseBuffer {
-    pub from: Destination,
-    pub message: TlaValue,
-}
-
-#[derive(Debug)]
-pub struct StartState {
-    pub global: GlobalState,
-    pub local: LocalState,
-    pub responses: Vec<ResponseBuffer>,
-}
-
-#[derive(Debug)]
-pub struct EndState {
-    pub global: GlobalState,
-    pub local: LocalState,
-    pub requests: Vec<RequestBuffer>,
-}
-
-#[derive(Debug)]
-pub struct StatePair {
-    pub start: StartState,
-    pub end: EndState,
 }
 
 #[derive(Debug)]
@@ -229,10 +139,7 @@ where
     let old_stage = mem::replace(&mut state.stage, Stage::Start);
     let start_state = match old_stage {
         Stage::End(start) => start,
-        _ => panic!(
-            "Issuing request {} to {}, but stage is start",
-            message, to.0
-        ),
+        _ => panic!("Issuing request {} to {}, but stage is start", message, to),
     };
     StatePair {
         start: start_state,
@@ -259,7 +166,7 @@ pub fn log_tla_response<F>(
         matches!(stage, Stage::Start),
         "Receiving response {} from {} in end stage",
         message,
-        from.0
+        from
     );
     *stage = Stage::End(StartState {
         global,
