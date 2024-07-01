@@ -391,7 +391,6 @@ version = "0.1.0"
 dependencies = [
  "candid",
  "itertools",
- "lazy_static",
  "serde",
  "tla_instrumentation_proc_macros",
 ]
