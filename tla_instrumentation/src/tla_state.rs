@@ -111,3 +111,9 @@ pub struct StatePair {
     pub start: StartState,
     pub end: EndState,
 }
+
+#[derive(Debug)]
+pub struct ResolvedStatePair {
+    pub start: GlobalState,
+    pub end: GlobalState,
+}

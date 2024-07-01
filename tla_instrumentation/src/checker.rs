@@ -6,6 +6,9 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
+use crate::ResolvedStatePair;
+use crate::VarAssignment;
+
 pub trait HasTlaRepr {
     fn to_tla_state(&self) -> HashMap<String, String>;
 }
@@ -89,12 +92,51 @@ fn run_apalache(
         })
 }
 
+pub struct PredicateDescription {
+    pub tla_module: PathBuf,
+    pub transition_predicate: String,
+    pub predicate_parameters: Vec<String>,
+}
+
+pub fn check_tla_code_link(
+    apalache: &Path,
+    predicate: PredicateDescription,
+    state_pair: ResolvedStatePair,
+    constants: VarAssignment,
+) -> Result<(), TlaCheckError> {
+    check_tla_code_link_raw(
+        apalache,
+        &predicate.tla_module,
+        predicate.transition_predicate,
+        predicate.predicate_parameters,
+        state_pair
+            .start
+            .0
+             .0
+            .into_iter()
+            .map(|(k, v)| (k, v.to_string()))
+            .collect(),
+        state_pair
+            .end
+            .0
+             .0
+            .into_iter()
+            .map(|(k, v)| (k, v.to_string()))
+            .collect(),
+        constants
+            .0
+            .into_iter()
+            .map(|(k, v)| (k, v.to_string()))
+            .collect(),
+    )
+}
+
 /** Uses Apalache to check whether a trace step is allowed by the TLA+ transition.
  *
  * Returns an error if Apalache returns one, or if there's something wrong with
  * the setup.
  */
-pub fn check_tla_code_link(
+pub fn check_tla_code_link_raw(
     apalache: &Path,
     tla_module: &Path,
     transition_predicate: String,
@@ -225,7 +267,7 @@ pub fn hacky_check_link(
         .join("rs")
         .join("tla_code_link_poc")
         .join(tla_module_name_relative_path);
-    check_tla_code_link(
+    check_tla_code_link_raw(
         &apalache,
         &tla_module,
         transition_predicate,
@@ -246,7 +288,7 @@ fn basic_test() {
         .join("tla_code_link_poc")
         .join("tla")
         .join("Counter.tla");
-    let result = check_tla_code_link(
+    let result = check_tla_code_link_raw(
         &apalache,
         &tla_module,
         "Next".to_string(),
