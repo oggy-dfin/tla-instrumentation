@@ -6,7 +6,7 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-candid = "0.10.8"
+candid = "^0.10.2"
 itertools = "0.13.0"
 serde = "1.0"
 tla_instrumentation_proc_macros = { path = "../tla_instrumentation_proc_macros" }
