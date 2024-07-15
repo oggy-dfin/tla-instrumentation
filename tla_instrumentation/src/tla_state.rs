@@ -41,7 +41,7 @@ impl VarAssignment {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct GlobalState(pub VarAssignment);
 
 impl GlobalState {
@@ -129,7 +129,7 @@ pub struct StatePair {
 }
 
 /// A pair of states with local variable names resolved to functions from the process ID
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct ResolvedStatePair {
     pub start: GlobalState,
     pub end: GlobalState,
