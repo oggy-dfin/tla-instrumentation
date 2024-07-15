@@ -18,6 +18,10 @@ pub struct Update {
     // TODO: do we want checks that all labels come from an allowed set?
     // labels: BTreeSet<Label>,
     pub process_id: String,
+    /// Used for naming the buffers; convention is to use
+    /// "<canister_name>_to_destination" for requests and
+    /// "destination_to_<canister_name>" for responses
+    pub canister_name: String,
 }
 
 #[derive(Debug)]
@@ -131,7 +135,7 @@ pub fn log_tla_request<F>(
     to: Destination,
     message: TlaValue,
     get_globals: F,
-) -> StatePair
+) -> ResolvedStatePair
 where
     F: FnOnce() -> GlobalState,
 {
@@ -141,14 +145,19 @@ where
         Stage::End(start) => start,
         _ => panic!("Issuing request {} to {}, but stage is start", message, to),
     };
-    StatePair {
+    let unresolved = StatePair {
         start: start_state,
         end: EndState {
             global,
             local: state.context.get_state(),
             requests: vec![RequestBuffer { to, message }],
         },
-    }
+    };
+    ResolvedStatePair::resolve(
+        unresolved,
+        state.context.update.process_id.as_str(),
+        state.context.update.canister_name.as_str(),
+    )
 }
 
 pub fn log_tla_response<F>(

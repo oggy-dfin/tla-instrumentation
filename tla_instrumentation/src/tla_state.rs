@@ -23,6 +23,10 @@ impl VarAssignment {
         self.0.insert(name.to_string(), value);
     }
 
+    pub fn extend(&mut self, other: VarAssignment) {
+        self.0.extend(other.0)
+    }
+
     pub fn merge(&self, other: VarAssignment) -> VarAssignment {
         assert!(
             self.0
@@ -43,6 +47,10 @@ pub struct GlobalState(pub VarAssignment);
 impl GlobalState {
     pub fn new() -> Self {
         Self(VarAssignment::new())
+    }
+
+    pub fn merge(&self, other: GlobalState) -> GlobalState {
+        GlobalState(self.0.merge(other.0))
     }
 }
 
@@ -112,8 +120,119 @@ pub struct StatePair {
     pub end: EndState,
 }
 
+/// A pair of states with local variable names resolved to functions from the process ID
 #[derive(Debug)]
 pub struct ResolvedStatePair {
     pub start: GlobalState,
     pub end: GlobalState,
+}
+
+fn resolve_local_variable(name: &str, value: &TlaValue, process_id: &str) -> VarAssignment {
+    let mut assignment = VarAssignment::new();
+    assignment.add(
+        &name,
+        TlaValue::Function(BTreeMap::from([(
+            TlaValue::Literal(process_id.to_string()),
+            value.clone(),
+        )])),
+    );
+    assignment
+}
+
+fn resolve_locals(locals: VarAssignment, process_id: &str) -> VarAssignment {
+    let mut resolved_locals = VarAssignment::new();
+    for (name, value) in locals.0 {
+        resolved_locals.extend(resolve_local_variable(&name, &value, process_id));
+    }
+    resolved_locals
+}
+
+fn resolve_request_buffers(requests: Vec<RequestBuffer>, canister_name: &str) -> VarAssignment {
+    let mut resolved_request_buffers = VarAssignment::new();
+    for request_buffer in requests {
+        let buffer_global = format!("{}_to_{}", canister_name, request_buffer.to.0);
+        let buffer_contents = TlaValue::Seq(vec![request_buffer.message.clone()]);
+        resolved_request_buffers.add(&buffer_global, buffer_contents);
+    }
+    resolved_request_buffers
+}
+
+fn resolve_response_buffers(responses: Vec<ResponseBuffer>, canister_name: &str) -> VarAssignment {
+    let mut resolved_response_buffers = VarAssignment::new();
+    for response_buffer in responses {
+        let buffer_global = format!("{}_to_{}", response_buffer.from.0, canister_name);
+        let buffer_contents = TlaValue::Set(BTreeSet::from([response_buffer.message.clone()]));
+        resolved_response_buffers.add(&buffer_global, buffer_contents);
+    }
+    resolved_response_buffers
+}
+
+impl ResolvedStatePair {
+    pub fn resolve(
+        unresolved: StatePair,
+        process_id: &str,
+        canister_name: &str,
+    ) -> ResolvedStatePair {
+        let resolved_start_locals = resolve_locals(unresolved.start.local.locals, process_id);
+        let resolved_end_locals = resolve_locals(unresolved.end.local.locals, process_id);
+        let resolved_responses =
+            resolve_response_buffers(unresolved.start.responses, canister_name);
+        let resolved_requests = resolve_request_buffers(unresolved.end.requests, canister_name);
+        ResolvedStatePair {
+            start: GlobalState(
+                unresolved
+                    .start
+                    .global
+                    .0
+                    .merge(resolved_start_locals)
+                    .merge(resolved_responses),
+            ),
+            end: GlobalState(
+                unresolved
+                    .end
+                    .global
+                    .0
+                    .merge(resolved_end_locals)
+                    .merge(resolved_requests),
+            ),
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    // Write a test that checks that the `resolve_locals` function works correctly
+    // by checking that the returned VarAssignment correctly interprets the local variables
+    // as functions from the process ID to the local variable value
+    #[test]
+    fn test_resolve_local_variable() {
+        let test_assignment = VarAssignment(BTreeMap::from([
+            ("foo".to_string(), TlaValue::Literal("bar".to_string())),
+            ("baz".to_string(), TlaValue::Literal("qux".to_string())),
+        ]));
+
+        let process_id = "pid";
+        let expected_assignment = VarAssignment(BTreeMap::from([
+            (
+                "foo".to_string(),
+                TlaValue::Function(BTreeMap::from([(
+                    TlaValue::Literal(process_id.to_string()),
+                    TlaValue::Literal("bar".to_string()),
+                )])),
+            ),
+            (
+                "baz".to_string(),
+                TlaValue::Function(BTreeMap::from([(
+                    TlaValue::Literal(process_id.to_string()),
+                    TlaValue::Literal("qux".to_string()),
+                )])),
+            ),
+        ]));
+
+        assert_eq!(
+            resolve_locals(test_assignment, process_id),
+            expected_assignment
+        );
+    }
 }
