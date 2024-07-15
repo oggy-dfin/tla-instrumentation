@@ -10,6 +10,12 @@ const PID: &str = "My_F_PID";
 const CAN_NAME: &str = "mycan";
 
 static mut GLOBAL: u64 = 0;
+
+fn init_global() {
+    unsafe {
+        GLOBAL = 0;
+    }
+}
 // Example of how to separate as much of the instrumentation code as possible from the main code
 #[macro_use]
 mod tla_stuff {
@@ -102,8 +108,18 @@ fn my_f() {
     }
 }
 
+async fn awaited_f() {
+    println!("Being awaited!")
+}
+
+#[tla_update(my_f_desc())]
+async fn my_f_async() {
+    awaited_f().await
+}
+
 #[test]
 fn basic_test() {
+    init_global();
     my_f();
     with_tla_state_pairs(|pairs: &mut Vec<ResolvedStatePair>| {
         println!("----------------");
@@ -147,5 +163,24 @@ fn basic_test() {
             Some(&BTreeSet::from([3_u64]).to_tla_value())
         );
         assert_eq!(second.end.get("global"), Some(&2_u64.to_tla_value()));
+    })
+}
+
+#[test]
+fn async_test() {
+    init_global();
+    let _res = tokio_test::block_on(my_f_async());
+    with_tla_state_pairs(|pairs: &mut Vec<ResolvedStatePair>| {
+        println!("----------------");
+        print!("State pairs:");
+        for pair in pairs.iter() {
+            println!("{:?}", pair.start);
+            println!("{:?}", pair.end);
+        }
+        println!("----------------");
+        assert_eq!(pairs.len(), 1);
+        let first = &pairs[0];
+        assert_eq!(first.start.get("global"), Some(&0_u64.to_tla_value()));
+        assert_eq!(first.end.get("global"), Some(&0_u64.to_tla_value()));
     })
 }

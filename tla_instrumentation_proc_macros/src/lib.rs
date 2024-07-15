@@ -25,20 +25,41 @@ pub fn tla_update(attr: TokenStream, item: TokenStream) -> TokenStream {
     let mangled_name = syn::Ident::new(&format!("_tla_impl_{}", sig.ident), sig.ident.span());
     modified_fn.sig.ident = mangled_name.clone();
 
-    let output = quote! {
-        #modified_fn
-        #(#attrs)* #vis #sig {
-            // Fail the compilation if we're not in debug mode
-            #[cfg(not(debug_assertions))]
-            let i:u32 = "abc";
+    let asyncness = sig.asyncness;
 
-            let body = || {
-                #block
-            };
-            tla_instrumentation::tla_log_method_call!(#attr2);
-            let res = body();
-            tla_instrumentation::tla_log_method_return!();
-            res
+    let output = if asyncness.is_some() {
+        quote! {
+            #modified_fn
+            #(#attrs)* #vis #sig {
+                // Fail the compilation if we're not in debug mode
+                #[cfg(not(debug_assertions))]
+                let i:u32 = "abc";
+
+                async fn body() {
+                    #block
+                }
+                tla_instrumentation::tla_log_method_call!(#attr2);
+                let res = body().await;
+                tla_instrumentation::tla_log_method_return!();
+                res
+            }
+        }
+    } else {
+        quote! {
+            #modified_fn
+            #(#attrs)* #vis #sig {
+                // Fail the compilation if we're not in debug mode
+                #[cfg(not(debug_assertions))]
+                let i:u32 = "abc";
+
+                let body = || {
+                    #block
+                };
+                tla_instrumentation::tla_log_method_call!(#attr2);
+                let res = body();
+                tla_instrumentation::tla_log_method_return!();
+                res
+            }
         }
     };
 

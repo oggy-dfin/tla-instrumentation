@@ -10,3 +10,6 @@ candid = "^0.10.2"
 itertools = "0.13.0"
 serde = "1.0"
 tla_instrumentation_proc_macros = { path = "../tla_instrumentation_proc_macros" }
+
+[dev-dependencies]
+tokio-test = "0.4.4"
