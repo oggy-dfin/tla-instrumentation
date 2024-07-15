@@ -35,9 +35,9 @@ pub fn tla_update(attr: TokenStream, item: TokenStream) -> TokenStream {
                 #[cfg(not(debug_assertions))]
                 let i:u32 = "abc";
 
-                async fn body() {
+                let body = || async {
                     #block
-                }
+                };
                 tla_instrumentation::tla_log_method_call!(#attr2);
                 let res = body().await;
                 tla_instrumentation::tla_log_method_return!();
