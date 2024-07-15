@@ -200,7 +200,7 @@ where
     InstrumentationState::new(function, get_globals())
 }
 
-pub fn log_method_return<F>(state: &mut InstrumentationState, get_globals: F) -> StatePair
+pub fn log_method_return<F>(state: &mut InstrumentationState, get_globals: F) -> ResolvedStatePair
 where
     F: FnOnce() -> GlobalState,
 {
@@ -210,14 +210,19 @@ where
         Stage::End(start) => start,
         _ => panic!("Returning from method, but not in an end state"),
     };
-    StatePair {
+    let unresolved = StatePair {
         start: start_state,
         end: EndState {
             global: get_globals(),
             local,
             requests: Vec::new(),
         },
-    }
+    };
+    ResolvedStatePair::resolve(
+        unresolved,
+        state.context.update.process_id.as_str(),
+        state.context.update.canister_name.as_str(),
+    )
 }
 
 /// Logs the value of local variables at the end of the current message handler.
@@ -254,7 +259,8 @@ macro_rules! tla_log_request {
 
         with_tla_state(|state| {
             with_tla_state_pairs(|state_pairs| {
-                let new_state_pair = $crate::log_tla_request(state, $to, message, get_tla_globals);
+                let new_state_pair =
+                    $crate::log_tla_request(state, $to, message, get_tla_globals!());
                 state_pairs.push(new_state_pair);
             });
         });
@@ -270,7 +276,7 @@ macro_rules! tla_log_response {
     ($from:expr, $message:expr) => {{
         let message = $message.to_tla_value();
         with_tla_state(|state| {
-            $crate::log_tla_response(state, $from, message, get_tla_globals);
+            $crate::log_tla_response(state, $from, message, get_tla_globals!());
         });
     }};
 }
@@ -284,7 +290,7 @@ macro_rules! tla_log_response {
 #[macro_export]
 macro_rules! tla_log_method_call {
     ($update:expr) => {{
-        init_tla_state($crate::log_method_call($update, get_tla_globals))
+        init_tla_state($crate::log_method_call($update, get_tla_globals!()))
     }};
 }
 
@@ -301,7 +307,7 @@ macro_rules! tla_log_method_return {
         println!("Logging method return");
         with_tla_state(|state| {
             with_tla_state_pairs(|state_pairs| {
-                let state_pair = $crate::log_method_return(state, get_tla_globals);
+                let state_pair = $crate::log_method_return(state, get_tla_globals!());
                 state_pairs.push(state_pair);
             });
         });

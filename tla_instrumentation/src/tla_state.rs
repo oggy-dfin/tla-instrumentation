@@ -52,6 +52,14 @@ impl GlobalState {
     pub fn merge(&self, other: GlobalState) -> GlobalState {
         GlobalState(self.0.merge(other.0))
     }
+
+    pub fn add(&mut self, name: &str, value: TlaValue) {
+        self.0.add(name, value)
+    }
+
+    pub fn get(&self, name: &str) -> Option<&TlaValue> {
+        self.0 .0.get(name)
+    }
 }
 
 #[derive(Clone, Debug)]
