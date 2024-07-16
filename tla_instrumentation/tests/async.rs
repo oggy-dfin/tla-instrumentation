@@ -96,23 +96,19 @@ mod tla_stuff {
 
 use tla_stuff::{init_tla_state, my_f_desc, with_tla_state, with_tla_state_pairs};
 
+async fn awaited_f() {
+    println!("Being awaited!")
+}
+
 #[tla_update(my_f_desc())]
-fn my_f() {
-    tla_log_locals!((x : 1_u64));
-    unsafe {
-        GLOBAL = 1;
-    }
-    tla_log_request!(Destination::new("othercan"), 2_u64);
-    tla_log_response!(Destination::new("othercan"), 3_u64);
-    unsafe {
-        GLOBAL = 2;
-    }
+async fn my_f_async() {
+    awaited_f().await
 }
 
 #[test]
-fn basic_test() {
+fn async_test() {
     init_global();
-    my_f();
+    let _res = tokio_test::block_on(my_f_async());
     with_tla_state_pairs(|pairs: &mut Vec<ResolvedStatePair>| {
         println!("----------------");
         print!("State pairs:");
@@ -121,39 +117,9 @@ fn basic_test() {
             println!("{:?}", pair.end);
         }
         println!("----------------");
-        assert_eq!(pairs.len(), 2);
+        assert_eq!(pairs.len(), 1);
         let first = &pairs[0];
         assert_eq!(first.start.get("global"), Some(&0_u64.to_tla_value()));
-        assert_eq!(first.end.get("global"), Some(&1_u64.to_tla_value()));
-        assert_eq!(
-            first.end.get("x"),
-            Some(TlaValue::Function(BTreeMap::from([(
-                TlaValue::Literal(PID.to_string()),
-                1_u64.to_tla_value()
-            ),])))
-            .as_ref()
-        );
-        assert_eq!(
-            first
-                .end
-                .get(format!("{}_to_{}", CAN_NAME, "othercan").as_str()),
-            Some(&TlaValue::Seq(vec![2_u64.to_tla_value()]))
-        );
-        let second = &pairs[1];
-        assert_eq!(second.start.get("global"), Some(&1_u64.to_tla_value()));
-        assert_eq!(
-            second.start.get("x"),
-            Some(&TlaValue::Function(BTreeMap::from([(
-                TlaValue::Literal(PID.to_string()),
-                1_u64.to_tla_value()
-            )])))
-        );
-        assert_eq!(
-            second
-                .start
-                .get(format!("{}_to_{}", "othercan", CAN_NAME).as_str()),
-            Some(&BTreeSet::from([3_u64]).to_tla_value())
-        );
-        assert_eq!(second.end.get("global"), Some(&2_u64.to_tla_value()));
+        assert_eq!(first.end.get("global"), Some(&0_u64.to_tla_value()));
     })
 }

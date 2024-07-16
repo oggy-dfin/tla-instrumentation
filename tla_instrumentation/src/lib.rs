@@ -30,7 +30,7 @@ enum LocationStackElem {
     Placeholder,
 }
 #[derive(Debug)]
-struct LocationStack(Vec<LocationStackElem>);
+pub struct LocationStack(Vec<LocationStackElem>);
 
 impl LocationStack {
     pub fn merge_labels(&self) -> Label {
@@ -48,10 +48,11 @@ impl LocationStack {
 }
 
 #[derive(Debug)]
-struct Context {
-    update: Update,
-    locals: VarAssignment,
-    location: LocationStack,
+pub struct Context {
+    pub update: Update,
+    pub global: GlobalState,
+    pub locals: VarAssignment,
+    pub location: LocationStack,
 }
 
 impl Context {
@@ -60,6 +61,7 @@ impl Context {
         let locals = update.default_start_locals.clone();
         Self {
             update,
+            global: GlobalState::new(),
             locals,
             location,
         }
@@ -103,7 +105,7 @@ enum Stage {
 
 #[derive(Debug)]
 pub struct InstrumentationState {
-    context: Context,
+    pub context: Context,
     stage: Stage,
 }
 
@@ -130,16 +132,17 @@ pub fn log_locals(state: &mut InstrumentationState, locals: Vec<(&str, TlaValue)
     state.context.log_locals(assignment);
 }
 
-pub fn log_tla_request<F>(
+pub fn log_globals(state: &mut InstrumentationState, global: GlobalState) {
+    state.context.global.extend(global);
+}
+
+pub fn log_tla_request(
     state: &mut InstrumentationState,
     to: Destination,
     message: TlaValue,
-    get_globals: F,
-) -> ResolvedStatePair
-where
-    F: FnOnce() -> GlobalState,
-{
-    let global = get_globals();
+    global: GlobalState,
+) -> ResolvedStatePair {
+    let global = global;
     let old_stage = mem::replace(&mut state.stage, Stage::Start);
     let start_state = match old_stage {
         Stage::End(start) => start,
@@ -148,7 +151,7 @@ where
     let unresolved = StatePair {
         start: start_state,
         end: EndState {
-            global,
+            global: state.context.global.merge(global),
             local: state.context.get_state(),
             requests: vec![RequestBuffer { to, message }],
         },
@@ -160,16 +163,13 @@ where
     )
 }
 
-pub fn log_tla_response<F>(
+pub fn log_tla_response(
     state: &mut InstrumentationState,
     from: Destination,
     message: TlaValue,
-    get_globals: F,
-) where
-    F: FnOnce() -> GlobalState,
-{
+    global: GlobalState,
+) {
     let local = state.context.get_state();
-    let global = get_globals();
     let stage = &mut state.stage;
     assert!(
         matches!(stage, Stage::Start),
@@ -178,7 +178,7 @@ pub fn log_tla_response<F>(
         from
     );
     *stage = Stage::End(StartState {
-        global,
+        global: state.context.global.merge(global),
         local,
         responses: vec![ResponseBuffer { from, message }],
     });
@@ -193,17 +193,14 @@ pub fn log_fn_return(state: &mut InstrumentationState) {
 }
 
 // TODO: Does this work for modeling arguments as non-deterministically chosen locals?
-pub fn log_method_call<F>(function: Update, get_globals: F) -> InstrumentationState
-where
-    F: FnOnce() -> GlobalState,
-{
-    InstrumentationState::new(function, get_globals())
+pub fn log_method_call(function: Update, global: GlobalState) -> InstrumentationState {
+    InstrumentationState::new(function, global)
 }
 
-pub fn log_method_return<F>(state: &mut InstrumentationState, get_globals: F) -> ResolvedStatePair
-where
-    F: FnOnce() -> GlobalState,
-{
+pub fn log_method_return(
+    state: &mut InstrumentationState,
+    global: GlobalState,
+) -> ResolvedStatePair {
     let local = state.context.end_update();
 
     let start_state = match mem::replace(&mut state.stage, Stage::Start) {
@@ -213,7 +210,7 @@ where
     let unresolved = StatePair {
         start: start_state,
         end: EndState {
-            global: get_globals(),
+            global,
             local,
             requests: Vec::new(),
         },
@@ -247,6 +244,39 @@ macro_rules! tla_log_locals {
     };
 }
 
+/// Logs the value of global variables at the end of the current message handler.
+/// This might be called multiple times in a single message handler, in particular
+/// if the message handler is implemented through several functions, each of which
+/// changes the global state, but some of which have access only to part of the global
+/// state variables that are reflected in the TLA model.
+/// It assumes that there is a function:
+/// `with_tla_state<F>(f: F) where F: FnOnce(&mut InstrumentationState) -> ()`
+/// in scope (typically providing a way to mutate some global canister variable).
+#[macro_export]
+macro_rules! tla_log_globals {
+    (($($name:ident : $value:expr),*)) => {
+        {
+            let mut globals = GlobalState::new();
+            $(
+                globals.add((stringify!($name), $value.to_tla_value()));
+            )*
+            with_tla_state(|state| {
+                $crate::log_globals(state, globals);
+            });
+        }
+    };
+}
+
+#[macro_export]
+macro_rules! tla_log_all_globals {
+    ($self:expr) => {{
+        let mut globals = get_tla_globals!($self);
+        with_tla_state(|state| {
+            $crate::log_globals(state, globals);
+        });
+    }};
+}
+
 /// Logs the sending of a request (ending a message handler).
 /// It assumes that there are the following three functions in scope:
 /// 1. `get_tla_globals() -> GlobalState
@@ -256,11 +286,26 @@ macro_rules! tla_log_locals {
 macro_rules! tla_log_request {
     ($to:expr, $message:expr) => {{
         let message = $message.to_tla_value();
+        let global = get_tla_globals!();
+
+        with_tla_state(|state| {
+            with_tla_state_pairs(|state_pairs| {
+                let new_state_pair = $crate::log_tla_request(state, $to, message, global);
+                state_pairs.push(new_state_pair);
+            });
+        });
+    }};
+}
+
+#[macro_export]
+macro_rules! tla_log_just_request {
+    ($to:expr, $message:expr) => {{
+        let message = $message.to_tla_value();
 
         with_tla_state(|state| {
             with_tla_state_pairs(|state_pairs| {
                 let new_state_pair =
-                    $crate::log_tla_request(state, $to, message, get_tla_globals!());
+                    $crate::log_tla_request(state, $to, message, GlobalState::new());
                 state_pairs.push(new_state_pair);
             });
         });
@@ -275,8 +320,19 @@ macro_rules! tla_log_request {
 macro_rules! tla_log_response {
     ($from:expr, $message:expr) => {{
         let message = $message.to_tla_value();
+        let global = get_tla_globals!();
         with_tla_state(|state| {
-            $crate::log_tla_response(state, $from, message, get_tla_globals!());
+            $crate::log_tla_response(state, $from, message, global);
+        });
+    }};
+}
+
+#[macro_export]
+macro_rules! tla_log_just_response {
+    ($from:expr, $message:expr) => {{
+        let message = $message.to_tla_value();
+        with_tla_state(|state| {
+            $crate::log_tla_response(state, $from, message, GlobalState::new());
         });
     }};
 }
@@ -289,8 +345,8 @@ macro_rules! tla_log_response {
 /// is used instead.
 #[macro_export]
 macro_rules! tla_log_method_call {
-    ($update:expr) => {{
-        init_tla_state($crate::log_method_call($update, get_tla_globals!()))
+    ($update:expr, $global:expr) => {{
+        init_tla_state($crate::log_method_call($update, $global))
     }};
 }
 
@@ -303,11 +359,11 @@ macro_rules! tla_log_method_call {
 /// is used instead.
 #[macro_export]
 macro_rules! tla_log_method_return {
-    () => {{
+    ($global:expr) => {{
         println!("Logging method return");
         with_tla_state(|state| {
             with_tla_state_pairs(|state_pairs| {
-                let state_pair = $crate::log_method_return(state, get_tla_globals!());
+                let state_pair = $crate::log_method_return(state, $global);
                 state_pairs.push(state_pair);
             });
         });

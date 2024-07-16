@@ -53,6 +53,10 @@ impl GlobalState {
         GlobalState(self.0.merge(other.0))
     }
 
+    pub fn extend(&mut self, other: GlobalState) {
+        self.0.extend(other.0)
+    }
+
     pub fn add(&mut self, name: &str, value: TlaValue) {
         self.0.add(name, value)
     }
