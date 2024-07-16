@@ -1,9 +1,4 @@
-use std::collections::{BTreeMap, BTreeSet};
-
-use tla_instrumentation::{
-    tla_log_locals, tla_log_request, tla_log_response, tla_value::ToTla, Destination,
-    ResolvedStatePair, TlaValue,
-};
+use tla_instrumentation::{tla_value::ToTla, ResolvedStatePair};
 use tla_instrumentation_proc_macros::tla_update;
 
 const PID: &str = "My_F_PID";

@@ -1,11 +1,8 @@
-use std::{
-    collections::{BTreeMap, BTreeSet},
-    ptr::addr_of_mut,
-};
+use std::{collections::BTreeSet, ptr::addr_of_mut};
 
 use tla_instrumentation::{
-    tla_log_all_globals, tla_log_globals, tla_log_just_request, tla_log_just_response,
-    tla_log_locals, tla_value::ToTla, Destination, GlobalState, ResolvedStatePair, TlaValue,
+    tla_log_all_globals, tla_log_just_request, tla_log_just_response, tla_value::ToTla,
+    Destination, GlobalState, ResolvedStatePair,
 };
 use tla_instrumentation_proc_macros::tla_update_method;
 

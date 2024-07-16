@@ -225,15 +225,6 @@ pub fn check_tla_code_link_raw(
     Ok(())
 }
 
-impl HasTlaRepr for TlaCounterState {
-    fn to_tla_state(&self) -> HashMap<String, String> {
-        HashMap::from([("cnt".to_string(), self.cnt.to_string())])
-    }
-}
-struct TlaCounterState {
-    cnt: u32,
-}
-
 #[test]
 fn retrieve_btc() {}
 
@@ -276,6 +267,18 @@ pub fn hacky_check_link(
         post_state,
         constants,
     )
+}
+
+#[cfg(test)]
+impl HasTlaRepr for TlaCounterState {
+    fn to_tla_state(&self) -> HashMap<String, String> {
+        HashMap::from([("cnt".to_string(), self.cnt.to_string())])
+    }
+}
+
+#[cfg(test)]
+struct TlaCounterState {
+    cnt: u32,
 }
 
 #[test]
