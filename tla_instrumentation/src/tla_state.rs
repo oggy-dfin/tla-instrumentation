@@ -79,13 +79,13 @@ impl Label {
     }
 }
 
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct LocalState {
     pub locals: VarAssignment,
     pub label: Label,
 }
 
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct Destination(String);
 
 impl Display for Destination {
@@ -106,13 +106,13 @@ pub struct RequestBuffer {
     pub message: TlaValue,
 }
 
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct ResponseBuffer {
     pub from: Destination,
     pub message: TlaValue,
 }
 
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct StartState {
     pub global: GlobalState,
     pub local: LocalState,

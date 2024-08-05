@@ -118,11 +118,30 @@ pub fn tla_update_method(attr: TokenStream, item: TokenStream) -> TokenStream {
                 #[cfg(not(debug_assertions))]
                 let i:u32 = "abc";
 
+                use std::cell::RefCell;
+                use std::rc::Rc;
+
                 let globals = get_tla_globals!(self);
-                tla_instrumentation::tla_log_method_call!(#attr2, globals);
-                let res = self.#mangled_name(#(#args),*).await;
-                let globals = get_tla_globals!(self);
-                tla_instrumentation::tla_log_method_return!(globals);
+                let mut pinned = Box::pin(tla_start_scope!(
+                    Rc::new(RefCell::new(tla_instrumentation::MethodInstrumentationState {
+                        state: tla_instrumentation::log_method_call(#attr2, globals),
+                        state_pairs: Vec::new(),
+                    })),
+                    async move {
+                        let res = self.#mangled_name(#(#args),*).await;
+                        let globals = get_tla_globals!(self);
+                        let state_with_pairs: Rc<RefCell<MethodInstrumentationState>> = tla_get_scope!();
+                        let mut state_with_pairs = state_with_pairs.borrow_mut();
+                        let state_pair = tla_instrumentation::log_method_return(&mut state_with_pairs.state, globals);
+                        state_with_pairs.state_pairs.push(state_pair);
+                        res
+                    }
+                ));
+                let res = pinned.as_mut().await;
+                let trace = pinned.as_mut().take_value().expect("No TLA trace in the future!");
+                let pairs = trace.borrow().state_pairs.clone();
+                println!("State pairs in the expanded macro: {:?}", pairs);
+                tla_add_state_pairs!(pairs);
                 res
             }
         }

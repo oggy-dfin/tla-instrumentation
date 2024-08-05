@@ -2,12 +2,32 @@ use std::{collections::BTreeSet, ptr::addr_of_mut};
 
 use tla_instrumentation::{
     tla_log_all_globals, tla_log_just_request, tla_log_just_response, tla_value::ToTla,
-    Destination, GlobalState, ResolvedStatePair,
+    Destination, GlobalState, MethodInstrumentationState, ResolvedStatePair,
 };
 use tla_instrumentation_proc_macros::tla_update_method;
+use tokio::task_local;
+
+use std::cell::RefCell;
+use std::rc::Rc;
 
 const PID: &str = "My_F_PID";
 const CAN_NAME: &str = "mycan";
+
+task_local! {
+    static TLA_STATE: Rc<RefCell<MethodInstrumentationState>>;
+}
+
+macro_rules! tla_start_scope {
+    ($state:expr, $f:expr) => {
+        TLA_STATE.scope($state, $f)
+    };
+}
+
+macro_rules! tla_get_scope {
+    () => {
+        TLA_STATE.get()
+    };
+}
 
 // Example of how to separate as much of the instrumentation code as possible from the main code
 #[macro_use]
@@ -19,8 +39,14 @@ mod tla_stuff {
         GlobalState, InstrumentationState, Label, ResolvedStatePair, ToTla, Update, VarAssignment,
     };
 
-    static mut STATE_PAIRS: Vec<ResolvedStatePair> = Vec::new();
-
+    pub static mut STATE_PAIRS: Vec<ResolvedStatePair> = Vec::new();
+    macro_rules! tla_add_state_pairs {
+        ($pairs:expr) => {
+            unsafe {
+                crate::tla_stuff::STATE_PAIRS.extend($pairs);
+            }
+        };
+    }
     static mut STATE: Option<InstrumentationState> = None;
 
     pub fn init_tla_state(s: InstrumentationState) -> () {
@@ -31,21 +57,6 @@ mod tla_stuff {
                 s
             );
             STATE = Some(s);
-        }
-    }
-
-    pub fn with_tla_state<F>(f: F)
-    where
-        F: FnOnce(&mut InstrumentationState) -> (),
-    {
-        unsafe {
-            if let Some(ref mut state) = STATE {
-                // print!("State before with_tla_state: {:?}", state);
-                f(state);
-                // print!("State after with_tla_state: {:?}", state)
-            } else {
-                panic!("Instrumentation state not initialized");
-            }
         }
     }
 
@@ -86,7 +97,7 @@ mod tla_stuff {
     }
 }
 
-use tla_stuff::{init_tla_state, my_f_desc, with_tla_state, with_tla_state_pairs};
+use tla_stuff::{init_tla_state, my_f_desc, with_tla_state_pairs}; // with_tla_state,
 
 struct StructCanister {
     pub counter: u64,
@@ -118,7 +129,7 @@ fn struct_test() {
     }
     with_tla_state_pairs(|pairs: &mut Vec<ResolvedStatePair>| {
         println!("----------------");
-        print!("State pairs:");
+        println!("State pairs:");
         for pair in pairs.iter() {
             println!("{:?}", pair.start);
             println!("{:?}", pair.end);

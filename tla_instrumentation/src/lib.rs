@@ -6,7 +6,7 @@ use std::mem;
 pub use tla_state::*;
 pub use tla_value::*;
 
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct Update {
     // TODO: do we want checks that only declared variables are set?
     // vars: BTreeSet<String>,
@@ -24,12 +24,12 @@ pub struct Update {
     pub canister_name: String,
 }
 
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 enum LocationStackElem {
     Label(Label),
     Placeholder,
 }
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct LocationStack(Vec<LocationStackElem>);
 
 impl LocationStack {
@@ -47,7 +47,7 @@ impl LocationStack {
     }
 }
 
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct Context {
     pub update: Update,
     pub global: GlobalState,
@@ -97,16 +97,22 @@ impl Context {
     }
 }
 
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 enum Stage {
     Start,
     End(StartState),
 }
 
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct InstrumentationState {
     pub context: Context,
     stage: Stage,
+}
+
+#[derive(Clone, Debug)]
+pub struct MethodInstrumentationState {
+    pub state: InstrumentationState,
+    pub state_pairs: Vec<ResolvedStatePair>,
 }
 
 impl InstrumentationState {
@@ -271,9 +277,9 @@ macro_rules! tla_log_globals {
 macro_rules! tla_log_all_globals {
     ($self:expr) => {{
         let mut globals = get_tla_globals!($self);
-        with_tla_state(|state| {
-            $crate::log_globals(state, globals);
-        });
+        let state_with_pairs = tla_get_scope!();
+        let mut state_with_pairs = state_with_pairs.borrow_mut();
+        $crate::log_globals(&mut state_with_pairs.state, globals);
     }};
 }
 
@@ -301,14 +307,15 @@ macro_rules! tla_log_request {
 macro_rules! tla_log_just_request {
     ($to:expr, $message:expr) => {{
         let message = $message.to_tla_value();
-
-        with_tla_state(|state| {
-            with_tla_state_pairs(|state_pairs| {
-                let new_state_pair =
-                    $crate::log_tla_request(state, $to, message, GlobalState::new());
-                state_pairs.push(new_state_pair);
-            });
-        });
+        let state_with_pairs = tla_get_scope!();
+        let mut state_with_pairs = state_with_pairs.borrow_mut();
+        let new_state_pair = $crate::log_tla_request(
+            &mut state_with_pairs.state,
+            $to,
+            message,
+            GlobalState::new(),
+        );
+        state_with_pairs.state_pairs.push(new_state_pair);
     }};
 }
 
@@ -331,9 +338,14 @@ macro_rules! tla_log_response {
 macro_rules! tla_log_just_response {
     ($from:expr, $message:expr) => {{
         let message = $message.to_tla_value();
-        with_tla_state(|state| {
-            $crate::log_tla_response(state, $from, message, GlobalState::new());
-        });
+        let state_with_pairs = tla_get_scope!();
+        let mut state_with_pairs = state_with_pairs.borrow_mut();
+        $crate::log_tla_response(
+            &mut state_with_pairs.state,
+            $from,
+            message,
+            GlobalState::new(),
+        );
     }};
 }
 
@@ -346,7 +358,7 @@ macro_rules! tla_log_just_response {
 #[macro_export]
 macro_rules! tla_log_method_call {
     ($update:expr, $global:expr) => {{
-        init_tla_state($crate::log_method_call($update, $global))
+        $crate::log_method_call($update, $global)
     }};
 }
 
@@ -359,11 +371,11 @@ macro_rules! tla_log_method_call {
 /// is used instead.
 #[macro_export]
 macro_rules! tla_log_method_return {
-    ($global:expr) => {{
+    ($global:expr, $state_with_pairs:expr) => {{
         println!("Logging method return");
         with_tla_state(|state| {
             with_tla_state_pairs(|state_pairs| {
-                let state_pair = $crate::log_method_return(state, $global);
+                let state_pair = $crate::log_method_return($state_with_pairsstate, $global);
                 state_pairs.push(state_pair);
             });
         });
