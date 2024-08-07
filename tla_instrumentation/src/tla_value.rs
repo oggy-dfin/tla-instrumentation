@@ -73,6 +73,12 @@ impl ToTla for Principal {
     }
 }
 
+impl ToTla for bool {
+    fn to_tla_value(&self) -> TlaValue {
+        TlaValue::Bool(*self)
+    }
+}
+
 impl ToTla for u32 {
     fn to_tla_value(&self) -> TlaValue {
         TlaValue::Int((*self).into())
