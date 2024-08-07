@@ -1,6 +1,7 @@
 pub mod checker;
 pub mod tla_state;
 pub mod tla_value;
+use std::cell::RefCell;
 use std::mem;
 use std::rc::Rc;
 
@@ -78,7 +79,6 @@ impl Context {
 
     fn end_update(&mut self) -> LocalState {
         LocalState {
-            // TODO: do we really want to overwrite all the current values? I guess it's fine
             locals: self
                 .update
                 .default_end_locals
@@ -109,19 +109,12 @@ enum Stage {
 }
 
 #[derive(Clone, Debug)]
-pub struct InstrumentationState {
+pub struct MessageHandlerState {
     pub context: Context,
     stage: Stage,
 }
 
-#[derive(Clone)]
-pub struct MethodInstrumentationState {
-    pub state: InstrumentationState,
-    pub state_pairs: Vec<ResolvedStatePair>,
-    pub globals_snapshotter: Rc<dyn Fn() -> GlobalState>,
-}
-
-impl InstrumentationState {
+impl MessageHandlerState {
     pub fn new(update: Update, global: GlobalState) -> Self {
         let locals = update.default_start_locals.clone();
         let label = update.start_label.clone();
@@ -136,8 +129,29 @@ impl InstrumentationState {
     }
 }
 
-pub fn log_locals(state: &mut InstrumentationState, locals: Vec<(&str, TlaValue)>) {
-    println!("State while logging locals: {:?}", state);
+#[derive(Clone)]
+pub struct InstrumentationState {
+    pub handler_state: Rc<RefCell<MessageHandlerState>>,
+    pub state_pairs: Rc<RefCell<Vec<ResolvedStatePair>>>,
+    pub globals_snapshotter: Rc<dyn Fn() -> GlobalState>,
+}
+
+impl InstrumentationState {
+    pub fn new(
+        update: Update,
+        global: GlobalState,
+        globals_snapshotter: Rc<dyn Fn() -> GlobalState>,
+    ) -> Self {
+        let state = MessageHandlerState::new(update, global);
+        Self {
+            handler_state: Rc::new(RefCell::new(state)),
+            state_pairs: Rc::new(RefCell::new(Vec::new())),
+            globals_snapshotter,
+        }
+    }
+}
+
+pub fn log_locals(state: &mut MessageHandlerState, locals: Vec<(&str, TlaValue)>) {
     let mut assignment = VarAssignment::new();
     for (name, value) in locals {
         assignment.push(name, value);
@@ -145,12 +159,12 @@ pub fn log_locals(state: &mut InstrumentationState, locals: Vec<(&str, TlaValue)
     state.context.log_locals(assignment);
 }
 
-pub fn log_globals(state: &mut InstrumentationState, global: GlobalState) {
+pub fn log_globals(state: &mut MessageHandlerState, global: GlobalState) {
     state.context.global.extend(global);
 }
 
-pub fn log_tla_request(
-    state: &mut InstrumentationState,
+pub fn log_request(
+    state: &mut MessageHandlerState,
     to: Destination,
     message: TlaValue,
     global: GlobalState,
@@ -175,8 +189,8 @@ pub fn log_tla_request(
     )
 }
 
-pub fn log_tla_response(
-    state: &mut InstrumentationState,
+pub fn log_response(
+    state: &mut MessageHandlerState,
     from: Destination,
     message: TlaValue,
     global: GlobalState,
@@ -190,10 +204,6 @@ pub fn log_tla_response(
         from
     );
     *stage = Stage::End(StartState {
-        // TODO: we need some "global with later overwrites" here for the
-        // start state, somehow...
-        /// TODO: we probably also need some "default globals" for the start state, in case
-        /// the global state is not available at all during a message handler (e.g., )
         global: global,
         local,
         responses: vec![ResponseBuffer { from, message }],
@@ -202,21 +212,21 @@ pub fn log_tla_response(
     state.context.locals = VarAssignment::new();
 }
 
-pub fn log_fn_call(state: &mut InstrumentationState) {
+pub fn log_fn_call(state: &mut MessageHandlerState) {
     state.context.call_function();
 }
 
-pub fn log_fn_return(state: &mut InstrumentationState) {
+pub fn log_fn_return(state: &mut MessageHandlerState) {
     state.context.return_from_function()
 }
 
 // TODO: Does this work for modeling arguments as non-deterministically chosen locals?
-pub fn log_method_call(function: Update, global: GlobalState) -> InstrumentationState {
-    InstrumentationState::new(function, global)
+pub fn log_method_call(function: Update, global: GlobalState) -> MessageHandlerState {
+    MessageHandlerState::new(function, global)
 }
 
 pub fn log_method_return(
-    state: &mut InstrumentationState,
+    state: &mut MessageHandlerState,
     global: GlobalState,
 ) -> ResolvedStatePair {
     let local = state.context.end_update();
@@ -255,9 +265,9 @@ macro_rules! tla_log_locals {
             $(
                 locals.push((stringify!($name), $value.to_tla_value()));
             )*
-            let state_with_pairs = tla_get_scope!();
-            let mut state_with_pairs = state_with_pairs.borrow_mut();
-            $crate::log_locals(&mut state_with_pairs.state, locals);
+            let state = TLA_INSTRUMENTATION_STATE.get();
+            let mut handler_state = state.handler_state.borrow_mut();
+            $crate::log_locals(&mut handler_state, locals);
         }
     };
 }
@@ -289,15 +299,15 @@ macro_rules! tla_log_globals {
 macro_rules! tla_log_all_globals {
     ($self:expr) => {{
         let mut globals = tla_get_globals!($self);
-        let state_with_pairs = tla_get_scope!();
-        let mut state_with_pairs = state_with_pairs.borrow_mut();
-        $crate::log_globals(&mut state_with_pairs.state, globals);
+        let state_with_pairs = TLA_INSTRUMENTATION_STATE.get();
+        let mut state = state_with_pairs.state.borrow_mut();
+        $crate::log_globals(&mut state, globals);
     }};
 }
 
 /// Logs the sending of a request (ending a message handler).
 /// It assumes that there are the following three functions in scope:
-/// TODO: update the comment here after the design is done
+/// TODO: update the comment here after the design is stabilized
 /// 1. `tla_get_globals() -> GlobalState
 /// 2. `with_tla_state<F>(f: F) where F: FnOnce(&mut InstrumentationState) -> ()
 /// 3. `with_tla_state_pairs<F>(f: F) where F: FnOnce(&mut Vec<StatePair>) -> ()
@@ -305,28 +315,28 @@ macro_rules! tla_log_all_globals {
 macro_rules! tla_log_request {
     ($to:expr, $message:expr) => {{
         let message = $message.to_tla_value();
-        let state_with_pairs = tla_get_scope!();
-        let mut state_with_pairs = state_with_pairs.borrow_mut();
-        let globals = (*state_with_pairs.globals_snapshotter)();
-        let new_state_pair =
-            $crate::log_tla_request(&mut state_with_pairs.state, $to, message, globals);
-        state_with_pairs.state_pairs.push(new_state_pair);
+        let instrumentation_state = TLA_INSTRUMENTATION_STATE.get();
+        let globals = (*instrumentation_state.globals_snapshotter)();
+        let mut state = instrumentation_state.handler_state.borrow_mut();
+        let new_state_pair = $crate::log_request(&mut state, $to, message, globals);
+        let mut state_pairs = instrumentation_state.state_pairs.borrow_mut();
+        state_pairs.push(new_state_pair);
     }};
 }
 
 /// Logs the receipt of a response (that starts a new message handler).
 /// It assumes that there are the following two functions in scope:
-/// TODO: update the comment here after the design is done
+/// TODO: update the comment here after the design is stabilized
 /// 1. `tla_get_globals() -> GlobalState`
 /// 2. with_tla_state<F>(f: F) where F: FnOnce(&mut InstrumentationState) -> ()
 #[macro_export]
 macro_rules! tla_log_response {
     ($from:expr, $message:expr) => {{
         let message = $message.to_tla_value();
-        let state_with_pairs = tla_get_scope!();
-        let mut state_with_pairs = state_with_pairs.borrow_mut();
-        let global = (*state_with_pairs.globals_snapshotter)();
-        $crate::log_tla_response(&mut state_with_pairs.state, $from, message, global);
+        let instrumentation_state = TLA_INSTRUMENTATION_STATE.get();
+        let mut handler_state = instrumentation_state.handler_state.borrow_mut();
+        let globals = (*instrumentation_state.globals_snapshotter)();
+        $crate::log_response(&mut handler_state, $from, message, globals);
     }};
 }
 

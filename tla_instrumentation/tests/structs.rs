@@ -4,65 +4,30 @@ use std::{
 };
 
 use tla_instrumentation::{
-    tla_log_locals, tla_log_request, tla_log_response, tla_value::ToTla, Destination, GlobalState,
-    MethodInstrumentationState, ResolvedStatePair,
+    tla_log_locals, tla_log_request, tla_log_response, tla_value::ToTla, Destination,
+    InstrumentationState,
 };
 use tla_instrumentation_proc_macros::tla_update_method;
-use tokio::task_local;
-
-use std::cell::RefCell;
-use std::rc::Rc;
-
-const PID: &str = "My_F_PID";
-const CAN_NAME: &str = "mycan";
-
-task_local! {
-    static TLA_STATE: Rc<RefCell<MethodInstrumentationState>>;
-}
-
-macro_rules! tla_start_scope {
-    ($state:expr, $f:expr) => {
-        TLA_STATE.scope($state, $f)
-    };
-}
-
-macro_rules! tla_get_scope {
-    () => {
-        TLA_STATE.get()
-    };
-}
 
 // Example of how to separate as much of the instrumentation code as possible from the main code
 #[macro_use]
 mod tla_stuff {
     use crate::StructCanister;
 
-    use super::{CAN_NAME, PID};
+    pub const PID: &str = "My_F_PID";
+    pub const CAN_NAME: &str = "mycan";
+
+    use std::sync::RwLock;
     use tla_instrumentation::{
         GlobalState, InstrumentationState, Label, ResolvedStatePair, ToTla, Update, VarAssignment,
     };
+    use tokio::task_local;
 
-    pub static mut STATE_PAIRS: Vec<ResolvedStatePair> = Vec::new();
-    macro_rules! tla_add_state_pairs {
-        ($pairs:expr) => {
-            unsafe {
-                crate::tla_stuff::STATE_PAIRS.extend($pairs);
-            }
-        };
+    task_local! {
+        pub static TLA_INSTRUMENTATION_STATE: InstrumentationState;
     }
-    static mut STATE: Option<InstrumentationState> = None;
 
-    pub fn with_tla_state_pairs<F>(f: F)
-    where
-        F: FnOnce(&mut Vec<ResolvedStatePair>) -> (),
-    {
-        unsafe {
-            // As unsafe as anything else, but see
-            // https://github.com/rust-lang/rust/issues/114447
-            // for why this particular syntax here
-            f(&mut *std::ptr::addr_of_mut!(STATE_PAIRS));
-        }
-    }
+    pub static TLA_TRACES: RwLock<Vec<ResolvedStatePair>> = RwLock::new(Vec::new());
 
     pub fn tla_get_globals(c: &StructCanister) -> GlobalState {
         let mut state = GlobalState::new();
@@ -89,7 +54,7 @@ mod tla_stuff {
     }
 }
 
-use tla_stuff::{my_f_desc, with_tla_state_pairs}; // with_tla_state,
+use tla_stuff::{my_f_desc, CAN_NAME, PID, TLA_INSTRUMENTATION_STATE, TLA_TRACES};
 
 struct StructCanister {
     pub counter: u64,
@@ -124,54 +89,53 @@ fn struct_test() {
         let canister = &mut *addr_of_mut!(GLOBAL);
         let _res = tokio_test::block_on(canister.my_method());
     }
-    with_tla_state_pairs(|pairs: &mut Vec<ResolvedStatePair>| {
-        println!("----------------");
-        println!("State pairs:");
-        for pair in pairs.iter() {
-            println!("{:?}", pair.start);
-            println!("{:?}", pair.end);
-        }
-        println!("----------------");
-        assert_eq!(pairs.len(), 2);
-        let first = &pairs[0];
-        assert_eq!(first.start.get("counter"), Some(&0_u64.to_tla_value()));
-        assert_eq!(first.end.get("counter"), Some(&1_u64.to_tla_value()));
+    let pairs = TLA_TRACES.read().unwrap();
+    println!("----------------");
+    println!("State pairs:");
+    for pair in pairs.iter() {
+        println!("{:?}", pair.start);
+        println!("{:?}", pair.end);
+    }
+    println!("----------------");
+    assert_eq!(pairs.len(), 2);
+    let first = &pairs[0];
+    assert_eq!(first.start.get("counter"), Some(&0_u64.to_tla_value()));
+    assert_eq!(first.end.get("counter"), Some(&1_u64.to_tla_value()));
 
-        assert_eq!(
-            first.start.get("my_local"),
-            Some(BTreeMap::from([(PID, 0_u64)]).to_tla_value()).as_ref()
-        );
-        assert_eq!(
-            first.end.get("my_local"),
-            Some(BTreeMap::from([(PID, 1_u64)]).to_tla_value()).as_ref()
-        );
+    assert_eq!(
+        first.start.get("my_local"),
+        Some(BTreeMap::from([(PID, 0_u64)]).to_tla_value()).as_ref()
+    );
+    assert_eq!(
+        first.end.get("my_local"),
+        Some(BTreeMap::from([(PID, 1_u64)]).to_tla_value()).as_ref()
+    );
 
-        assert_eq!(
-            first
-                .end
-                .get(format!("{}_to_{}", CAN_NAME, "othercan").as_str()),
-            Some(&vec![2_u64].to_tla_value())
-        );
+    assert_eq!(
+        first
+            .end
+            .get(format!("{}_to_{}", CAN_NAME, "othercan").as_str()),
+        Some(&vec![2_u64].to_tla_value())
+    );
 
-        let second = &pairs[1];
+    let second = &pairs[1];
 
-        assert_eq!(second.start.get("counter"), Some(&1_u64.to_tla_value()));
-        assert_eq!(second.end.get("counter"), Some(&2_u64.to_tla_value()));
+    assert_eq!(second.start.get("counter"), Some(&1_u64.to_tla_value()));
+    assert_eq!(second.end.get("counter"), Some(&2_u64.to_tla_value()));
 
-        assert_eq!(
-            second.start.get("my_local"),
-            Some(BTreeMap::from([(PID, 1_u64)]).to_tla_value()).as_ref()
-        );
-        assert_eq!(
-            second.end.get("my_local"),
-            Some(BTreeMap::from([(PID, 2_u64)]).to_tla_value()).as_ref()
-        );
+    assert_eq!(
+        second.start.get("my_local"),
+        Some(BTreeMap::from([(PID, 1_u64)]).to_tla_value()).as_ref()
+    );
+    assert_eq!(
+        second.end.get("my_local"),
+        Some(BTreeMap::from([(PID, 2_u64)]).to_tla_value()).as_ref()
+    );
 
-        assert_eq!(
-            second
-                .start
-                .get(format!("{}_to_{}", "othercan", CAN_NAME).as_str()),
-            Some(&BTreeSet::from([3_u64]).to_tla_value())
-        );
-    })
+    assert_eq!(
+        second
+            .start
+            .get(format!("{}_to_{}", "othercan", CAN_NAME).as_str()),
+        Some(&BTreeSet::from([3_u64]).to_tla_value())
+    );
 }

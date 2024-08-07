@@ -123,28 +123,26 @@ pub fn tla_update_method(attr: TokenStream, item: TokenStream) -> TokenStream {
 
                 let globals = tla_get_globals!(self);
                 let raw_ptr = self as *const _;
-                let snapshotter = move || { unsafe { tla_get_globals!(&*raw_ptr) } };
-                let mut pinned = Box::pin(tla_start_scope!(
-                    Rc::new(RefCell::new(tla_instrumentation::MethodInstrumentationState {
-                        state: tla_instrumentation::log_method_call(#attr2, globals),
-                        state_pairs: Vec::new(),
-                        globals_snapshotter: Rc::new(snapshotter),
-                    })),
+                let snapshotter = Rc::new(move || { unsafe { tla_get_globals!(&*raw_ptr) } });
+                let mut pinned = Box::pin(TLA_INSTRUMENTATION_STATE.scope(
+                    tla_instrumentation::InstrumentationState::new(#attr2, globals, snapshotter),
                     async move {
                         let res = self.#mangled_name(#(#args),*).await;
                         let globals = tla_get_globals!(self);
-                        let state_with_pairs: Rc<RefCell<MethodInstrumentationState>> = tla_get_scope!();
-                        let mut state_with_pairs = state_with_pairs.borrow_mut();
-                        let state_pair = tla_instrumentation::log_method_return(&mut state_with_pairs.state, globals);
-                        state_with_pairs.state_pairs.push(state_pair);
+                        let state: InstrumentationState = TLA_INSTRUMENTATION_STATE.get();
+                        let mut handler_state = state.handler_state.borrow_mut();
+                        let state_pair = tla_instrumentation::log_method_return(&mut handler_state, globals);
+                        let mut state_pairs = state.state_pairs.borrow_mut();
+                        state_pairs.push(state_pair);
                         res
                     }
                 ));
                 let res = pinned.as_mut().await;
                 let trace = pinned.as_mut().take_value().expect("No TLA trace in the future!");
-                let pairs = trace.borrow().state_pairs.clone();
+                let pairs = trace.state_pairs.borrow().clone();
                 println!("State pairs in the expanded macro: {:?}", pairs);
-                tla_add_state_pairs!(pairs);
+                let mut traces = TLA_TRACES.write().unwrap();
+                traces.extend(pairs);
                 res
             }
         }

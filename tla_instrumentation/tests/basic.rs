@@ -21,14 +21,14 @@ fn init_global() {
 mod tla_stuff {
     use super::{CAN_NAME, PID};
     use tla_instrumentation::{
-        GlobalState, InstrumentationState, Label, ResolvedStatePair, ToTla, Update, VarAssignment,
+        GlobalState, MessageHandlerState, Label, ResolvedStatePair, ToTla, Update, VarAssignment,
     };
 
     static mut STATE_PAIRS: Vec<ResolvedStatePair> = Vec::new();
 
-    static mut STATE: Option<InstrumentationState> = None;
+    static mut STATE: Option<MessageHandlerState> = None;
 
-    pub fn init_tla_state(s: InstrumentationState) -> () {
+    pub fn init_tla_state(s: MessageHandlerState) -> () {
         unsafe {
             assert!(
                 STATE.is_none(),
@@ -42,7 +42,7 @@ mod tla_stuff {
 
     pub fn with_tla_state<F>(f: F)
     where
-        F: FnOnce(&mut InstrumentationState) -> (),
+        F: FnOnce(&mut MessageHandlerState) -> (),
     {
         unsafe {
             if let Some(ref mut state) = STATE {
