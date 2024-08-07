@@ -19,7 +19,13 @@ impl VarAssignment {
         self.0.extend(locals)
     }
 
-    pub fn add(&mut self, name: &str, value: TlaValue) {
+    pub fn add(&self, name: &str, value: TlaValue) -> VarAssignment {
+        let mut new_locals = self.clone();
+        new_locals.push(name, value);
+        new_locals
+    }
+
+    pub fn push(&mut self, name: &str, value: TlaValue) {
         self.0.insert(name.to_string(), value);
     }
 
@@ -33,7 +39,11 @@ impl VarAssignment {
                 .keys()
                 .collect::<BTreeSet<_>>()
                 .is_disjoint(&other.0.keys().collect()),
-            "The states have non-disjoint sets of keys"
+            "The states have non-disjoint sets of keys: {:?}",
+            self.0
+                .keys()
+                .collect::<BTreeSet<_>>()
+                .intersection(&other.0.keys().collect::<BTreeSet<_>>())
         );
         let mut new_locals = self.0.clone();
         new_locals.extend(other.0);
@@ -58,7 +68,7 @@ impl GlobalState {
     }
 
     pub fn add(&mut self, name: &str, value: TlaValue) {
-        self.0.add(name, value)
+        self.0.push(name, value)
     }
 
     pub fn get(&self, name: &str) -> Option<&TlaValue> {
@@ -141,7 +151,7 @@ pub struct ResolvedStatePair {
 
 fn resolve_local_variable(name: &str, value: &TlaValue, process_id: &str) -> VarAssignment {
     let mut assignment = VarAssignment::new();
-    assignment.add(
+    assignment.push(
         &name,
         TlaValue::Function(BTreeMap::from([(
             TlaValue::Literal(process_id.to_string()),
@@ -164,7 +174,7 @@ fn resolve_request_buffers(requests: Vec<RequestBuffer>, canister_name: &str) ->
     for request_buffer in requests {
         let buffer_global = format!("{}_to_{}", canister_name, request_buffer.to.0);
         let buffer_contents = TlaValue::Seq(vec![request_buffer.message.clone()]);
-        resolved_request_buffers.add(&buffer_global, buffer_contents);
+        resolved_request_buffers.push(&buffer_global, buffer_contents);
     }
     resolved_request_buffers
 }
@@ -174,7 +184,7 @@ fn resolve_response_buffers(responses: Vec<ResponseBuffer>, canister_name: &str)
     for response_buffer in responses {
         let buffer_global = format!("{}_to_{}", response_buffer.from.0, canister_name);
         let buffer_contents = TlaValue::Set(BTreeSet::from([response_buffer.message.clone()]));
-        resolved_response_buffers.add(&buffer_global, buffer_contents);
+        resolved_response_buffers.push(&buffer_global, buffer_contents);
     }
     resolved_response_buffers
 }
@@ -187,6 +197,8 @@ impl ResolvedStatePair {
     ) -> ResolvedStatePair {
         let resolved_start_locals = resolve_locals(unresolved.start.local.locals, process_id);
         let resolved_end_locals = resolve_locals(unresolved.end.local.locals, process_id);
+        println!("Resolved start locals: {:?}", resolved_start_locals);
+        println!("Resolved end locals: {:?}", resolved_end_locals);
         let resolved_responses =
             resolve_response_buffers(unresolved.start.responses, canister_name);
         let resolved_requests = resolve_request_buffers(unresolved.end.requests, canister_name);

@@ -46,10 +46,10 @@ pub fn tla_update(attr: TokenStream, item: TokenStream) -> TokenStream {
                 #[cfg(not(debug_assertions))]
                 let i:u32 = "abc";
 
-                let globals = get_tla_globals!();
+                let globals = tla_get_globals!();
                 tla_instrumentation::tla_log_method_call!(#attr2, globals);
                 let res = #mangled_name(#(#args),*).await;
-                let globals = get_tla_globals!();
+                let globals = tla_get_globals!();
                 tla_instrumentation::tla_log_method_return!(globals);
                 res
             }
@@ -63,10 +63,10 @@ pub fn tla_update(attr: TokenStream, item: TokenStream) -> TokenStream {
                 #[cfg(not(debug_assertions))]
                 let i:u32 = "abc";
 
-                let globals = get_tla_globals!();
+                let globals = tla_get_globals!();
                 tla_instrumentation::tla_log_method_call!(#attr2, globals);
                 let res = #mangled_name(#(#args),*);
-                let globals = get_tla_globals!();
+                let globals = tla_get_globals!();
                 tla_instrumentation::tla_log_method_return!(globals);
                 res
             }
@@ -121,15 +121,18 @@ pub fn tla_update_method(attr: TokenStream, item: TokenStream) -> TokenStream {
                 use std::cell::RefCell;
                 use std::rc::Rc;
 
-                let globals = get_tla_globals!(self);
+                let globals = tla_get_globals!(self);
+                let raw_ptr = self as *const _;
+                let snapshotter = move || { unsafe { tla_get_globals!(&*raw_ptr) } };
                 let mut pinned = Box::pin(tla_start_scope!(
                     Rc::new(RefCell::new(tla_instrumentation::MethodInstrumentationState {
                         state: tla_instrumentation::log_method_call(#attr2, globals),
                         state_pairs: Vec::new(),
+                        globals_snapshotter: Rc::new(snapshotter),
                     })),
                     async move {
                         let res = self.#mangled_name(#(#args),*).await;
-                        let globals = get_tla_globals!(self);
+                        let globals = tla_get_globals!(self);
                         let state_with_pairs: Rc<RefCell<MethodInstrumentationState>> = tla_get_scope!();
                         let mut state_with_pairs = state_with_pairs.borrow_mut();
                         let state_pair = tla_instrumentation::log_method_return(&mut state_with_pairs.state, globals);
@@ -154,10 +157,10 @@ pub fn tla_update_method(attr: TokenStream, item: TokenStream) -> TokenStream {
                 #[cfg(not(debug_assertions))]
                 let i:u32 = "abc";
 
-                let globals = get_tla_globals!();
+                let globals = tla_get_globals!();
                 tla_instrumentation::tla_log_method_call!(#attr2, globals);
                 let res = #mangled_name(#(#args),*);
-                let globals = get_tla_globals!();
+                let globals = tla_get_globals!();
                 tla_instrumentation::tla_log_method_return!(globals);
                 res
             }
@@ -188,7 +191,7 @@ pub fn tla_function(attr: TokenStream, item: TokenStream) -> TokenStream {
             #[cfg(not(debug_assertions))]
             let i:u32 = "abc";
             crate::tla::with_tla_state(|state| {
-                tla_instrumentation::log_fn_call!(state, #arg, crate::tla::get_tla_globals);
+                tla_instrumentation::log_fn_call!(state, #arg, crate::tla::tla_get_globals);
             });
             #block
             crate::tla::with_tla_state(|state| {

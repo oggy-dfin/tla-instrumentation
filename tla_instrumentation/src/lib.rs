@@ -2,6 +2,7 @@ pub mod checker;
 pub mod tla_state;
 pub mod tla_value;
 use std::mem;
+use std::rc::Rc;
 
 pub use tla_state::*;
 pub use tla_value::*;
@@ -58,7 +59,7 @@ pub struct Context {
 impl Context {
     fn new(update: Update) -> Self {
         let location = LocationStack(vec![LocationStackElem::Label(update.start_label.clone())]);
-        let locals = update.default_start_locals.clone();
+        let locals = VarAssignment::new();
         Self {
             update,
             global: GlobalState::new(),
@@ -78,7 +79,11 @@ impl Context {
     fn end_update(&mut self) -> LocalState {
         LocalState {
             // TODO: do we really want to overwrite all the current values? I guess it's fine
-            locals: self.update.default_end_locals.clone(),
+            locals: self
+                .update
+                .default_end_locals
+                .clone()
+                .merge(self.locals.clone()),
             label: self.update.end_label.clone(),
         }
     }
@@ -109,10 +114,11 @@ pub struct InstrumentationState {
     stage: Stage,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone)]
 pub struct MethodInstrumentationState {
     pub state: InstrumentationState,
     pub state_pairs: Vec<ResolvedStatePair>,
+    pub globals_snapshotter: Rc<dyn Fn() -> GlobalState>,
 }
 
 impl InstrumentationState {
@@ -131,9 +137,10 @@ impl InstrumentationState {
 }
 
 pub fn log_locals(state: &mut InstrumentationState, locals: Vec<(&str, TlaValue)>) {
+    println!("State while logging locals: {:?}", state);
     let mut assignment = VarAssignment::new();
     for (name, value) in locals {
-        assignment.add(name, value);
+        assignment.push(name, value);
     }
     state.context.log_locals(assignment);
 }
@@ -148,7 +155,6 @@ pub fn log_tla_request(
     message: TlaValue,
     global: GlobalState,
 ) -> ResolvedStatePair {
-    let global = global;
     let old_stage = mem::replace(&mut state.stage, Stage::Start);
     let start_state = match old_stage {
         Stage::End(start) => start,
@@ -157,7 +163,7 @@ pub fn log_tla_request(
     let unresolved = StatePair {
         start: start_state,
         end: EndState {
-            global: state.context.global.merge(global),
+            global: global,
             local: state.context.get_state(),
             requests: vec![RequestBuffer { to, message }],
         },
@@ -184,10 +190,16 @@ pub fn log_tla_response(
         from
     );
     *stage = Stage::End(StartState {
-        global: state.context.global.merge(global),
+        // TODO: we need some "global with later overwrites" here for the
+        // start state, somehow...
+        /// TODO: we probably also need some "default globals" for the start state, in case
+        /// the global state is not available at all during a message handler (e.g., )
+        global: global,
         local,
         responses: vec![ResponseBuffer { from, message }],
     });
+    state.context.global = GlobalState::new();
+    state.context.locals = VarAssignment::new();
 }
 
 pub fn log_fn_call(state: &mut InstrumentationState) {
@@ -237,15 +249,15 @@ pub fn log_method_return(
 /// in scope (typically providing a way to mutate some global canister variable).
 #[macro_export]
 macro_rules! tla_log_locals {
-    (($($name:ident : $value:expr),*)) => {
+    ($($name:ident : $value:expr),*) => {
         {
             let mut locals = Vec::new();
             $(
                 locals.push((stringify!($name), $value.to_tla_value()));
             )*
-            with_tla_state(|state| {
-                $crate::log_locals(state, locals);
-            });
+            let state_with_pairs = tla_get_scope!();
+            let mut state_with_pairs = state_with_pairs.borrow_mut();
+            $crate::log_locals(&mut state_with_pairs.state, locals);
         }
     };
 }
@@ -276,7 +288,7 @@ macro_rules! tla_log_globals {
 #[macro_export]
 macro_rules! tla_log_all_globals {
     ($self:expr) => {{
-        let mut globals = get_tla_globals!($self);
+        let mut globals = tla_get_globals!($self);
         let state_with_pairs = tla_get_scope!();
         let mut state_with_pairs = state_with_pairs.borrow_mut();
         $crate::log_globals(&mut state_with_pairs.state, globals);
@@ -285,73 +297,42 @@ macro_rules! tla_log_all_globals {
 
 /// Logs the sending of a request (ending a message handler).
 /// It assumes that there are the following three functions in scope:
-/// 1. `get_tla_globals() -> GlobalState
+/// TODO: update the comment here after the design is done
+/// 1. `tla_get_globals() -> GlobalState
 /// 2. `with_tla_state<F>(f: F) where F: FnOnce(&mut InstrumentationState) -> ()
 /// 3. `with_tla_state_pairs<F>(f: F) where F: FnOnce(&mut Vec<StatePair>) -> ()
 #[macro_export]
 macro_rules! tla_log_request {
     ($to:expr, $message:expr) => {{
         let message = $message.to_tla_value();
-        let global = get_tla_globals!();
-
-        with_tla_state(|state| {
-            with_tla_state_pairs(|state_pairs| {
-                let new_state_pair = $crate::log_tla_request(state, $to, message, global);
-                state_pairs.push(new_state_pair);
-            });
-        });
-    }};
-}
-
-#[macro_export]
-macro_rules! tla_log_just_request {
-    ($to:expr, $message:expr) => {{
-        let message = $message.to_tla_value();
         let state_with_pairs = tla_get_scope!();
         let mut state_with_pairs = state_with_pairs.borrow_mut();
-        let new_state_pair = $crate::log_tla_request(
-            &mut state_with_pairs.state,
-            $to,
-            message,
-            GlobalState::new(),
-        );
+        let globals = (*state_with_pairs.globals_snapshotter)();
+        let new_state_pair =
+            $crate::log_tla_request(&mut state_with_pairs.state, $to, message, globals);
         state_with_pairs.state_pairs.push(new_state_pair);
     }};
 }
 
 /// Logs the receipt of a response (that starts a new message handler).
 /// It assumes that there are the following two functions in scope:
-/// 1. `get_tla_globals() -> GlobalState`
+/// TODO: update the comment here after the design is done
+/// 1. `tla_get_globals() -> GlobalState`
 /// 2. with_tla_state<F>(f: F) where F: FnOnce(&mut InstrumentationState) -> ()
 #[macro_export]
 macro_rules! tla_log_response {
     ($from:expr, $message:expr) => {{
         let message = $message.to_tla_value();
-        let global = get_tla_globals!();
-        with_tla_state(|state| {
-            $crate::log_tla_response(state, $from, message, global);
-        });
-    }};
-}
-
-#[macro_export]
-macro_rules! tla_log_just_response {
-    ($from:expr, $message:expr) => {{
-        let message = $message.to_tla_value();
         let state_with_pairs = tla_get_scope!();
         let mut state_with_pairs = state_with_pairs.borrow_mut();
-        $crate::log_tla_response(
-            &mut state_with_pairs.state,
-            $from,
-            message,
-            GlobalState::new(),
-        );
+        let global = (*state_with_pairs.globals_snapshotter)();
+        $crate::log_tla_response(&mut state_with_pairs.state, $from, message, global);
     }};
 }
 
 /// Logs the start of a method (top-level update)
 /// It assumes that there are the following two functions in scope:
-/// 1. `get_tla_globals() -> GlobalState`
+/// 1. `tla_get_globals() -> GlobalState`
 /// 2. with_tla_state<F>(f: F) where F: FnOnce(&mut InstrumentationState) -> ()
 /// This macro is normally not called directly; rather, the attribute proc macro tla_update
 /// is used instead.
@@ -359,25 +340,5 @@ macro_rules! tla_log_just_response {
 macro_rules! tla_log_method_call {
     ($update:expr, $global:expr) => {{
         $crate::log_method_call($update, $global)
-    }};
-}
-
-/// Logs the start of a method (top-level update)
-/// This assumes that there are the following three functions in scope:
-/// 1. `get_tla_globals() -> GlobalState`
-/// 2. `with_tla_state<F>(f: F) where F: FnOnce(&mut InstrumentationState) -> ()`
-/// 3. `with_tla_state_pairs<F>(f: F) where F: FnOnce(&mut Vec<StatePair>) -> ()`
-/// This macro is normally not called directly; rather, the attribute proc macro tla_update
-/// is used instead.
-#[macro_export]
-macro_rules! tla_log_method_return {
-    ($global:expr, $state_with_pairs:expr) => {{
-        println!("Logging method return");
-        with_tla_state(|state| {
-            with_tla_state_pairs(|state_pairs| {
-                let state_pair = $crate::log_method_return($state_with_pairsstate, $global);
-                state_pairs.push(state_pair);
-            });
-        });
     }};
 }
