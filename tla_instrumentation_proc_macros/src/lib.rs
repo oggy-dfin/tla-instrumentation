@@ -1,7 +1,7 @@
 use proc_macro::TokenStream;
 use proc_macro2::TokenStream as TokenStream2;
 use quote::quote;
-use syn::{parse_macro_input, Expr, ItemFn};
+use syn::{parse_macro_input, ItemFn};
 
 /// Used to annotate top-level methods (which de-facto start an update call)
 #[proc_macro_attribute]
@@ -162,39 +162,6 @@ pub fn tla_update_method(attr: TokenStream, item: TokenStream) -> TokenStream {
                 tla_instrumentation::tla_log_method_return!(globals);
                 res
             }
-        }
-    };
-
-    output.into()
-}
-
-#[proc_macro_attribute]
-pub fn tla_function(attr: TokenStream, item: TokenStream) -> TokenStream {
-    // Parse the input tokens of the attribute and the function
-    let input_fn = parse_macro_input!(item as ItemFn);
-    let arg = parse_macro_input!(attr as Expr);
-
-    // Deconstruct the function elements
-    let ItemFn {
-        attrs,
-        vis,
-        sig,
-        block,
-    } = input_fn;
-
-    // Generate the new function with the macro call inserted at the beginning
-    let output = quote! {
-        #(#attrs)* #vis #sig {
-            // Fail the compilation if we're not in debug mode
-            #[cfg(not(debug_assertions))]
-            let i:u32 = "abc";
-            crate::tla::with_tla_state(|state| {
-                tla_instrumentation::log_fn_call!(state, #arg, crate::tla::tla_get_globals);
-            });
-            #block
-            crate::tla::with_tla_state(|state| {
-                tla_instrumentation::log_fn_return!(state);
-            });
         }
     };
 

@@ -265,9 +265,16 @@ macro_rules! tla_log_locals {
             $(
                 locals.push((stringify!($name), $value.to_tla_value()));
             )*
-            let state = TLA_INSTRUMENTATION_STATE.get();
-            let mut handler_state = state.handler_state.borrow_mut();
-            $crate::log_locals(&mut handler_state, locals);
+            let res = TLA_INSTRUMENTATION_STATE.try_with(|state| {
+                let mut handler_state = state.handler_state.borrow_mut();
+                $crate::log_locals(&mut handler_state, locals.clone());
+            });
+            match res {
+                Ok(_) => (),
+                Err(_) => {
+                    println!("Asked to log locals {:?}, but instrumentation not initialized", locals);
+                }
+            };
         }
     };
 }
@@ -315,12 +322,19 @@ macro_rules! tla_log_all_globals {
 macro_rules! tla_log_request {
     ($to:expr, $message:expr) => {{
         let message = $message.to_tla_value();
-        let instrumentation_state = TLA_INSTRUMENTATION_STATE.get();
-        let globals = (*instrumentation_state.globals_snapshotter)();
-        let mut state = instrumentation_state.handler_state.borrow_mut();
-        let new_state_pair = $crate::log_request(&mut state, $to, message, globals);
-        let mut state_pairs = instrumentation_state.state_pairs.borrow_mut();
-        state_pairs.push(new_state_pair);
+        let res = TLA_INSTRUMENTATION_STATE.try_with(|state| {
+            let mut handler_state = state.handler_state.borrow_mut();
+            let globals = (*state.globals_snapshotter)();
+            let new_state_pair = $crate::log_request(&mut handler_state, $to, message.clone(), globals);
+            let mut state_pairs = state.state_pairs.borrow_mut();
+            state_pairs.push(new_state_pair);
+        });
+        match res {
+            Ok(_) => (),
+            Err(_) => {
+                println!("Asked to log request to {} with message {}, but instrumentation not initialized", $to, message);
+            }
+        };
     }};
 }
 
@@ -333,10 +347,17 @@ macro_rules! tla_log_request {
 macro_rules! tla_log_response {
     ($from:expr, $message:expr) => {{
         let message = $message.to_tla_value();
-        let instrumentation_state = TLA_INSTRUMENTATION_STATE.get();
-        let mut handler_state = instrumentation_state.handler_state.borrow_mut();
-        let globals = (*instrumentation_state.globals_snapshotter)();
-        $crate::log_response(&mut handler_state, $from, message, globals);
+        let res = TLA_INSTRUMENTATION_STATE.try_with(|state| {
+            let mut handler_state = state.handler_state.borrow_mut();
+            let globals = (*state.globals_snapshotter)();
+            $crate::log_response(&mut handler_state, $from, message.clone(), globals);
+        });
+        match res {
+            Ok(_) => (),
+            Err(_) => {
+                println!("Asked to log response from {} with message {}, but instrumentation not initialized", $from, message);
+            }
+        };
     }};
 }
 

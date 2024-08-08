@@ -3,6 +3,8 @@ use std::{
     ptr::addr_of_mut,
 };
 
+// Also possible to define a wrapper macro, in order to ensure that logging is only
+// done when certain crate features are enabled
 use tla_instrumentation::{
     tla_log_locals, tla_log_request, tla_log_response, tla_value::ToTla, Destination,
     InstrumentationState,
