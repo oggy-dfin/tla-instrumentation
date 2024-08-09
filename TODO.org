@@ -1,0 +1,1 @@
+* Figure out how to allow the user to choose between failing silently and raising an error if the LocalKey is not present (not scoped)

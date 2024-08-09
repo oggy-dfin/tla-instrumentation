@@ -67,6 +67,12 @@ pub trait ToTla {
     fn to_tla_value(&self) -> TlaValue;
 }
 
+impl ToTla for TlaValue {
+    fn to_tla_value(&self) -> TlaValue {
+        self.clone()
+    }
+}
+
 impl ToTla for Principal {
     fn to_tla_value(&self) -> TlaValue {
         TlaValue::Literal(self.to_string())
