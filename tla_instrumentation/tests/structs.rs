@@ -113,7 +113,12 @@ fn struct_test() {
         let canister = &mut *addr_of_mut!(GLOBAL);
         let _res = tokio_test::block_on(canister.my_method());
     }
-    let pairs = &TLA_TRACES.read().unwrap()[0].state_pairs;
+    let trace = &TLA_TRACES.read().unwrap()[0];
+    assert_eq!(
+        trace.constants.to_map().get("MAX_COUNTER"),
+        Some(&2_u64.to_string())
+    );
+    let pairs = &trace.state_pairs;
     println!("----------------");
     println!("State pairs:");
     for pair in pairs.iter() {

@@ -197,8 +197,8 @@ impl ResolvedStatePair {
     ) -> ResolvedStatePair {
         let resolved_start_locals = resolve_locals(unresolved.start.local.locals, process_id);
         let resolved_end_locals = resolve_locals(unresolved.end.local.locals, process_id);
-        println!("Resolved start locals: {:?}", resolved_start_locals);
-        println!("Resolved end locals: {:?}", resolved_end_locals);
+        // println!("Resolved start locals: {:?}", resolved_start_locals);
+        // println!("Resolved end locals: {:?}", resolved_end_locals);
         let resolved_responses =
             resolve_response_buffers(unresolved.start.responses, canister_name);
         let resolved_requests = resolve_request_buffers(unresolved.end.requests, canister_name);

@@ -142,7 +142,7 @@ pub fn tla_update_method(attr: TokenStream, item: TokenStream) -> TokenStream {
                 let trace = pinned.as_mut().take_value().expect("No TLA trace in the future!");
                 let pairs = trace.state_pairs.borrow().clone();
                 let constants = (update.constants_extractor)(&pairs);
-                println!("State pairs in the expanded macro: {:?}", pairs);
+                // println!("State pairs in the expanded macro: {:?}", pairs);
                 let mut traces = TLA_TRACES.write().unwrap();
                 traces.push(tla_instrumentation::UpdateTrace {
                     update,
