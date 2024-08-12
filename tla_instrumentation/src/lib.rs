@@ -30,6 +30,7 @@ pub struct Update {
     pub constants_extractor: fn(&Vec<ResolvedStatePair>) -> TlaConstantAssignment,
 }
 
+#[derive(Debug)]
 pub struct UpdateTrace {
     pub update: Update,
     pub state_pairs: Vec<ResolvedStatePair>,
