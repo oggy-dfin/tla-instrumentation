@@ -16,12 +16,15 @@ use tla_instrumentation_proc_macros::tla_update_method;
 mod tla_stuff {
     use crate::StructCanister;
 
+    use candid::Nat;
+
     pub const PID: &str = "My_F_PID";
     pub const CAN_NAME: &str = "mycan";
 
-    use std::sync::RwLock;
+    use std::{collections::BTreeMap, sync::RwLock};
     use tla_instrumentation::{
-        GlobalState, InstrumentationState, Label, ResolvedStatePair, ToTla, Update, VarAssignment,
+        GlobalState, InstrumentationState, Label, TlaConstantAssignment, TlaValue, ToTla, Update,
+        UpdateTrace, VarAssignment,
     };
     use tokio::task_local;
 
@@ -29,7 +32,7 @@ mod tla_stuff {
         pub static TLA_INSTRUMENTATION_STATE: InstrumentationState;
     }
 
-    pub static TLA_TRACES: RwLock<Vec<ResolvedStatePair>> = RwLock::new(Vec::new());
+    pub static TLA_TRACES: RwLock<Vec<UpdateTrace>> = RwLock::new(Vec::new());
 
     pub fn tla_get_globals(c: &StructCanister) -> GlobalState {
         let mut state = GlobalState::new();
@@ -52,6 +55,25 @@ mod tla_stuff {
             end_label: Label::new("End_Label"),
             process_id: PID.to_string(),
             canister_name: CAN_NAME.to_string(),
+            constants_extractor: |trace| {
+                let max_counter = trace
+                    .iter()
+                    .map(
+                        |pair| match (pair.start.get("counter"), pair.end.get("counter")) {
+                            (
+                                Some(TlaValue::Int(start_counter)),
+                                Some(TlaValue::Int(end_counter)),
+                            ) => start_counter.max(end_counter).clone(),
+                            _ => Nat::from(0_u64),
+                        },
+                    )
+                    .max();
+                let constants = BTreeMap::from([(
+                    "MAX_COUNTER".to_string(),
+                    max_counter.unwrap_or(Nat::from(0_u64)).to_tla_value(),
+                )]);
+                TlaConstantAssignment { constants }
+            },
         }
     }
 }
@@ -91,7 +113,7 @@ fn struct_test() {
         let canister = &mut *addr_of_mut!(GLOBAL);
         let _res = tokio_test::block_on(canister.my_method());
     }
-    let pairs = TLA_TRACES.read().unwrap();
+    let pairs = &TLA_TRACES.read().unwrap()[0].state_pairs;
     println!("----------------");
     println!("State pairs:");
     for pair in pairs.iter() {

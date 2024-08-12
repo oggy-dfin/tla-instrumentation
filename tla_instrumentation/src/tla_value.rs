@@ -49,7 +49,7 @@ impl Display for TlaValue {
     }
 }
 
-#[derive(Clone, Hash, PartialEq, Eq, PartialOrd, Ord, CandidType, Deserialize)]
+#[derive(Clone, Hash, PartialEq, Eq, PartialOrd, Ord, CandidType, Deserialize, Debug)]
 pub struct TlaConstantAssignment {
     pub constants: BTreeMap<String, TlaValue>,
 }
@@ -94,6 +94,12 @@ impl ToTla for u32 {
 impl ToTla for u64 {
     fn to_tla_value(&self) -> TlaValue {
         TlaValue::Int((*self).into())
+    }
+}
+
+impl ToTla for Nat {
+    fn to_tla_value(&self) -> TlaValue {
+        TlaValue::Int(self.clone())
     }
 }
 

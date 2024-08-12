@@ -124,8 +124,9 @@ pub fn tla_update_method(attr: TokenStream, item: TokenStream) -> TokenStream {
                 let globals = tla_get_globals!(self);
                 let raw_ptr = self as *const _;
                 let snapshotter = Rc::new(move || { unsafe { tla_get_globals!(&*raw_ptr) } });
+                let update = #attr2;
                 let mut pinned = Box::pin(TLA_INSTRUMENTATION_STATE.scope(
-                    tla_instrumentation::InstrumentationState::new(#attr2, globals, snapshotter),
+                    tla_instrumentation::InstrumentationState::new(update.clone(), globals, snapshotter),
                     async move {
                         let res = self.#mangled_name(#(#args),*).await;
                         let globals = tla_get_globals!(self);
@@ -140,9 +141,14 @@ pub fn tla_update_method(attr: TokenStream, item: TokenStream) -> TokenStream {
                 let res = pinned.as_mut().await;
                 let trace = pinned.as_mut().take_value().expect("No TLA trace in the future!");
                 let pairs = trace.state_pairs.borrow().clone();
+                let constants = (update.constants_extractor)(&pairs);
                 println!("State pairs in the expanded macro: {:?}", pairs);
                 let mut traces = TLA_TRACES.write().unwrap();
-                traces.extend(pairs);
+                traces.push(tla_instrumentation::UpdateTrace {
+                    update,
+                    state_pairs: pairs,
+                    constants,
+                } );
                 res
             }
         }

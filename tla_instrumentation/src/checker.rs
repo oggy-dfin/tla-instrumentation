@@ -7,7 +7,7 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 
 use crate::ResolvedStatePair;
-use crate::VarAssignment;
+use crate::TlaConstantAssignment;
 
 pub trait HasTlaRepr {
     fn to_tla_state(&self) -> HashMap<String, String>;
@@ -102,7 +102,7 @@ pub fn check_tla_code_link(
     apalache: &Path,
     predicate: PredicateDescription,
     state_pair: ResolvedStatePair,
-    constants: VarAssignment,
+    constants: TlaConstantAssignment,
 ) -> Result<(), TlaCheckError> {
     check_tla_code_link_raw(
         apalache,
@@ -124,7 +124,7 @@ pub fn check_tla_code_link(
             .map(|(k, v)| (k, v.to_string()))
             .collect(),
         constants
-            .0
+            .constants
             .into_iter()
             .map(|(k, v)| (k, v.to_string()))
             .collect(),
