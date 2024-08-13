@@ -207,11 +207,18 @@ fn resolve_request_buffers(
     resolved_request_buffers
 }
 
-fn resolve_response_buffers(responses: Vec<ResponseBuffer>, canister_name: &str) -> VarAssignment {
+fn resolve_response_buffers(
+    responses: Vec<ResponseBuffer>,
+    canister_name: &str,
+    process_id: &str,
+) -> VarAssignment {
     let mut resolved_response_buffers = VarAssignment::new();
     for response_buffer in responses {
         let buffer_global = format!("{}_to_{}", response_buffer.from.0, canister_name);
-        let buffer_contents = TlaValue::Set(BTreeSet::from([response_buffer.message.clone()]));
+        let buffer_contents = TlaValue::Set(BTreeSet::from([TlaValue::Record(BTreeMap::from([
+            ("caller".to_string(), process_id.to_tla_value()),
+            ("response".to_string(), response_buffer.message.clone()),
+        ]))]));
         resolved_response_buffers.push(&buffer_global, buffer_contents);
     }
     resolved_response_buffers
@@ -238,7 +245,7 @@ impl ResolvedStatePair {
         // println!("Resolved start locals: {:?}", resolved_start_locals);
         // println!("Resolved end locals: {:?}", resolved_end_locals);
         let resolved_responses =
-            resolve_response_buffers(unresolved.start.responses, canister_name);
+            resolve_response_buffers(unresolved.start.responses, canister_name, process_id);
         let resolved_requests =
             resolve_request_buffers(unresolved.end.requests, canister_name, process_id);
         ResolvedStatePair {

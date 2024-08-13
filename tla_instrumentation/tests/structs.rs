@@ -183,6 +183,12 @@ fn struct_test() {
         second
             .start
             .get(format!("{}_to_{}", "othercan", CAN_NAME).as_str()),
-        Some(&BTreeSet::from([3_u64]).to_tla_value())
+        Some(
+            &BTreeSet::from([TlaValue::Record(BTreeMap::from([
+                ("caller".to_string(), PID.to_tla_value()),
+                ("response".to_string(), 3_u64.to_tla_value())
+            ]))])
+            .to_tla_value()
+        )
     );
 }

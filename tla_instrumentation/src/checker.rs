@@ -87,7 +87,13 @@ fn run_apalache(
             if e.success() {
                 Ok(())
             } else {
-                Err(TlaCheckError::ApalacheError(e.to_string()))
+                Err(TlaCheckError::ApalacheError(
+                    format!(
+                        "When checking file\n{:?}\nApalache returned the error: {}",
+                        tla_module, e
+                    )
+                    .to_string(),
+                ))
             }
         })
 }
