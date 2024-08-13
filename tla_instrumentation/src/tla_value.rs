@@ -33,7 +33,7 @@ impl Display for TlaValue {
             }
             TlaValue::Function(map) => {
                 let elements = map.iter().map(|(k, v)| format!("{} :> {}", k, v));
-                write!(f, "{}", join(elements, " @@ "))
+                write!(f, "({})", join(elements, " @@ "))
             }
             TlaValue::Seq(vec) => {
                 let elements = vec.iter().map(|x| format!("{}", x));
