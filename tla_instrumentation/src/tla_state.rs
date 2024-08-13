@@ -51,7 +51,7 @@ impl VarAssignment {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct GlobalState(pub VarAssignment);
 
 impl GlobalState {
@@ -73,6 +73,17 @@ impl GlobalState {
 
     pub fn get(&self, name: &str) -> Option<&TlaValue> {
         self.0 .0.get(name)
+    }
+}
+
+impl std::fmt::Debug for GlobalState {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("GlobalState ")?;
+        let mut debug_map = f.debug_map();
+        for (key, value) in &self.0 .0 {
+            debug_map.entry(key, value);
+        }
+        debug_map.finish()
     }
 }
 

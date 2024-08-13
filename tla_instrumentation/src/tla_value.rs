@@ -7,7 +7,7 @@ use std::{
     fmt::{Display, Formatter},
 };
 
-#[derive(Clone, Debug, Hash, PartialEq, Eq, PartialOrd, Ord, CandidType, Deserialize)]
+#[derive(Clone, Hash, PartialEq, Eq, PartialOrd, Ord, CandidType, Deserialize)]
 pub enum TlaValue {
     Set(BTreeSet<TlaValue>),
     Record(BTreeMap<String, TlaValue>),
@@ -45,6 +45,46 @@ impl Display for TlaValue {
             // Candid likes to pretty print its numbers
             TlaValue::Int(i) => write!(f, "{}", format!("{}", i).replace("_", "")),
             TlaValue::Variant { tag, value } => write!(f, "Variant(\"{}\", {})", tag, value),
+        }
+    }
+}
+
+impl fmt::Debug for TlaValue {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        match self {
+            TlaValue::Set(set) => {
+                let mut debug_set = f.debug_set();
+                for elem in set {
+                    debug_set.entry(elem);
+                }
+                debug_set.finish()
+            }
+            TlaValue::Record(map) => {
+                let mut debug_map = f.debug_map();
+                for (key, value) in map {
+                    debug_map.entry(&format!("\"{}\"", key), value);
+                }
+                debug_map.finish()
+            }
+            TlaValue::Function(map) => {
+                let mut debug_map = f.debug_map();
+                for (key, value) in map {
+                    debug_map.entry(key, value);
+                }
+                debug_map.finish()
+            }
+            TlaValue::Seq(vec) => {
+                let mut debug_list = f.debug_list();
+                for elem in vec {
+                    debug_list.entry(elem);
+                }
+                debug_list.finish()
+            }
+            TlaValue::Literal(s) => write!(f, "\"{}\"", s),
+            TlaValue::Constant(s) => write!(f, "{}", s),
+            TlaValue::Bool(b) => write!(f, "{}", b),
+            TlaValue::Int(n) => write!(f, "{}", n),
+            TlaValue::Variant { tag, value } => write!(f, "{}({:#?})", tag, value),
         }
     }
 }
