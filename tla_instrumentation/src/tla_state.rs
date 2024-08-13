@@ -124,7 +124,8 @@ impl Destination {
 #[derive(Debug)]
 pub struct RequestBuffer {
     pub to: Destination,
-    pub message: TlaValue,
+    pub method: String,
+    pub args: TlaValue,
 }
 
 #[derive(Clone, Debug)]
@@ -180,11 +181,27 @@ fn resolve_locals(locals: VarAssignment, process_id: &str) -> VarAssignment {
     resolved_locals
 }
 
-fn resolve_request_buffers(requests: Vec<RequestBuffer>, canister_name: &str) -> VarAssignment {
+fn resolve_request_buffers(
+    requests: Vec<RequestBuffer>,
+    canister_name: &str,
+    process_id: &str,
+) -> VarAssignment {
     let mut resolved_request_buffers = VarAssignment::new();
     for request_buffer in requests {
         let buffer_global = format!("{}_to_{}", canister_name, request_buffer.to.0);
-        let buffer_contents = TlaValue::Seq(vec![request_buffer.message.clone()]);
+        let buffer_contents = TlaValue::Seq(vec![TlaValue::Record(BTreeMap::from([
+            (
+                "caller".to_string(),
+                TlaValue::Literal(process_id.to_string()),
+            ),
+            (
+                "method_and_args".to_string(),
+                TlaValue::Variant {
+                    tag: request_buffer.method,
+                    value: Box::new(request_buffer.args.clone()),
+                },
+            ),
+        ]))]);
         resolved_request_buffers.push(&buffer_global, buffer_contents);
     }
     resolved_request_buffers
@@ -222,7 +239,8 @@ impl ResolvedStatePair {
         // println!("Resolved end locals: {:?}", resolved_end_locals);
         let resolved_responses =
             resolve_response_buffers(unresolved.start.responses, canister_name);
-        let resolved_requests = resolve_request_buffers(unresolved.end.requests, canister_name);
+        let resolved_requests =
+            resolve_request_buffers(unresolved.end.requests, canister_name, process_id);
         ResolvedStatePair {
             start: GlobalState(
                 unresolved

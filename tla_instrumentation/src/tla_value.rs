@@ -84,7 +84,7 @@ impl fmt::Debug for TlaValue {
             TlaValue::Constant(s) => write!(f, "{}", s),
             TlaValue::Bool(b) => write!(f, "{}", b),
             TlaValue::Int(n) => write!(f, "{}", n),
-            TlaValue::Variant { tag, value } => write!(f, "{}({:#?})", tag, value),
+            TlaValue::Variant { tag, value } => write!(f, "Variant(\"{}\", {:#?})", tag, value),
         }
     }
 }

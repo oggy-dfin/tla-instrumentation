@@ -176,7 +176,8 @@ pub fn log_request(
     state: &mut MessageHandlerState,
     label: &str,
     to: Destination,
-    message: TlaValue,
+    method: &str,
+    args: TlaValue,
     global: GlobalState,
 ) -> ResolvedStatePair {
     // TODO: do we want to push the label to the location stack here, or just replace it?
@@ -184,14 +185,18 @@ pub fn log_request(
     let old_stage = mem::replace(&mut state.stage, Stage::Start);
     let start_state = match old_stage {
         Stage::End(start) => start,
-        _ => panic!("Issuing request {} to {}, but stage is start", message, to),
+        _ => panic!("Issuing request {} to {}, but stage is start", args, to),
     };
     let unresolved = StatePair {
         start: start_state,
         end: EndState {
             global: global,
             local: state.context.get_state(),
-            requests: vec![RequestBuffer { to, message }],
+            requests: vec![RequestBuffer {
+                to,
+                method: method.to_string(),
+                args,
+            }],
         },
     };
     ResolvedStatePair::resolve(
@@ -332,12 +337,12 @@ macro_rules! tla_log_all_globals {
 /// 3. `with_tla_state_pairs<F>(f: F) where F: FnOnce(&mut Vec<StatePair>) -> ()
 #[macro_export]
 macro_rules! tla_log_request {
-    ($label:expr, $to:expr, $message:expr) => {{
+    ($label:expr, $to:expr, $method:expr, $message:expr) => {{
         let message = $message.to_tla_value();
         let res = TLA_INSTRUMENTATION_STATE.try_with(|state| {
             let mut handler_state = state.handler_state.borrow_mut();
             let globals = (*state.globals_snapshotter)();
-            let new_state_pair = $crate::log_request(&mut handler_state, $label, $to, message.clone(), globals);
+            let new_state_pair = $crate::log_request(&mut handler_state, $label, $to, $method, message.clone(), globals);
             let mut state_pairs = state.state_pairs.borrow_mut();
             state_pairs.push(new_state_pair);
         });

@@ -6,8 +6,9 @@ use std::{
 // Also possible to define a wrapper macro, in order to ensure that logging is only
 // done when certain crate features are enabled
 use tla_instrumentation::{
-    tla_log_locals, tla_log_request, tla_log_response, tla_value::ToTla, Destination,
-    InstrumentationState,
+    tla_log_locals, tla_log_request, tla_log_response,
+    tla_value::{TlaValue, ToTla},
+    Destination, InstrumentationState,
 };
 use tla_instrumentation_proc_macros::tla_update_method;
 
@@ -87,7 +88,12 @@ struct StructCanister {
 static mut GLOBAL: StructCanister = StructCanister { counter: 0 };
 
 fn call_maker() {
-    tla_log_request!("WaitForResponse", Destination::new("othercan"), 2_u64);
+    tla_log_request!(
+        "WaitForResponse",
+        Destination::new("othercan"),
+        "target_method",
+        2_u64
+    );
     tla_log_response!(Destination::new("othercan"), 3_u64);
 }
 
@@ -144,7 +150,19 @@ fn struct_test() {
         first
             .end
             .get(format!("{}_to_{}", CAN_NAME, "othercan").as_str()),
-        Some(&vec![2_u64].to_tla_value())
+        Some(
+            &vec![TlaValue::Record(BTreeMap::from([
+                ("caller".to_string(), PID.to_tla_value()),
+                (
+                    "method_and_args".to_string(),
+                    TlaValue::Variant {
+                        tag: "target_method".to_string(),
+                        value: Box::new(2_u64.to_tla_value())
+                    }
+                )
+            ]))]
+            .to_tla_value()
+        )
     );
 
     let second = &pairs[1];
