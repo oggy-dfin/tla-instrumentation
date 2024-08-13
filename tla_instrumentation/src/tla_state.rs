@@ -1,4 +1,4 @@
-use crate::tla_value::TlaValue;
+use crate::tla_value::{TlaValue, ToTla};
 use candid::CandidType;
 use serde::Deserialize;
 use std::{
@@ -207,7 +207,17 @@ impl ResolvedStatePair {
         canister_name: &str,
     ) -> ResolvedStatePair {
         let resolved_start_locals = resolve_locals(unresolved.start.local.locals, process_id);
+        let start_pc = resolve_local_variable(
+            "pc",
+            &unresolved.start.local.label.0.to_tla_value(),
+            process_id,
+        );
         let resolved_end_locals = resolve_locals(unresolved.end.local.locals, process_id);
+        let end_pc = resolve_local_variable(
+            "pc",
+            &unresolved.end.local.label.0.to_tla_value(),
+            process_id,
+        );
         // println!("Resolved start locals: {:?}", resolved_start_locals);
         // println!("Resolved end locals: {:?}", resolved_end_locals);
         let resolved_responses =
@@ -220,7 +230,8 @@ impl ResolvedStatePair {
                     .global
                     .0
                     .merge(resolved_start_locals)
-                    .merge(resolved_responses),
+                    .merge(resolved_responses)
+                    .merge(start_pc),
             ),
             end: GlobalState(
                 unresolved
@@ -228,7 +239,8 @@ impl ResolvedStatePair {
                     .global
                     .0
                     .merge(resolved_end_locals)
-                    .merge(resolved_requests),
+                    .merge(resolved_requests)
+                    .merge(end_pc),
             ),
         }
     }

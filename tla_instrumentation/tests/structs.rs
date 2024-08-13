@@ -87,7 +87,7 @@ struct StructCanister {
 static mut GLOBAL: StructCanister = StructCanister { counter: 0 };
 
 fn call_maker() {
-    tla_log_request!(Destination::new("othercan"), 2_u64);
+    tla_log_request!("WaitForResponse", Destination::new("othercan"), 2_u64);
     tla_log_response!(Destination::new("othercan"), 3_u64);
 }
 

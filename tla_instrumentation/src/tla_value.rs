@@ -178,3 +178,9 @@ impl ToTla for &str {
         TlaValue::Literal(self.to_string())
     }
 }
+
+impl ToTla for String {
+    fn to_tla_value(&self) -> TlaValue {
+        TlaValue::Literal(self.clone())
+    }
+}
