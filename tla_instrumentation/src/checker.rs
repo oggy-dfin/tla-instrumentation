@@ -184,10 +184,6 @@ pub fn check_tla_code_link_raw(
                 tla_module.display()
             ))
             .map(|n| n.to_string_lossy())?;
-        let module_file_name = tla_module.file_name().ok_or(format!(
-            "Can't compute the file name of {}",
-            tla_module.display()
-        ))?;
 
         let module_text = fs::read_to_string(tla_module)
             .map_err(|_e| format!("Couldn't read from module {}", tla_module.display()))?;
@@ -222,9 +218,9 @@ pub fn check_tla_code_link_raw(
         );
         let new_module = format!("{}\n{}\n====", module_body, predicates.join("\n"));
         let temp_file_path = parent_dir.join(format!(
-            "{}_{}_{}",
+            "{}_{}_{}.tla",
             new_module_prefix,
-            module_file_name.to_string_lossy(),
+            module_name,
             new_module_suffix
         ));
         fs::write(temp_file_path.clone(), new_module).map_err(|e| e.to_string())?;
