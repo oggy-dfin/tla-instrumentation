@@ -137,6 +137,14 @@ pub fn check_tla_code_link(
     )
 }
 
+fn sha256_hex(input: Vec<u8>) -> String {
+    use sha2::{Digest, Sha256};
+    let mut hasher = Sha256::new();
+    hasher.update(input);
+    let result = hasher.finalize();
+    format!("{:x}", result)
+}
+
 /** Uses Apalache to check whether a trace step is allowed by the TLA+ transition.
  *
  * Returns an error if Apalache returns one, or if there's something wrong with
@@ -191,9 +199,21 @@ pub fn check_tla_code_link_raw(
         // Change the module name such that it fits the new file name
         // TODO: use uuids or something to prevent clashes
         let new_module_prefix = "Code_Link";
+        let new_module_suffix = &sha256_hex(
+            predicates
+                .iter()
+                .chain(constants.iter())
+                .flat_map(|s| s.as_bytes())
+                .cloned()
+                .collect(),
+        )[..32];
         let module_body = module_body.replace(
             format!("MODULE {}", module_name.clone()).as_str(),
-            format!("MODULE {}_{}", new_module_prefix, module_name).as_str(),
+            format!(
+                "MODULE {}_{}_{}",
+                new_module_prefix, module_name, new_module_suffix
+            )
+            .as_str(),
         );
 
         let module_body = module_body.replace(
@@ -202,9 +222,10 @@ pub fn check_tla_code_link_raw(
         );
         let new_module = format!("{}\n{}\n====", module_body, predicates.join("\n"));
         let temp_file_path = parent_dir.join(format!(
-            "{}_{}",
+            "{}_{}_{}",
             new_module_prefix,
-            module_file_name.to_string_lossy()
+            module_file_name.to_string_lossy(),
+            new_module_suffix
         ));
         fs::write(temp_file_path.clone(), new_module).map_err(|e| e.to_string())?;
         Ok(temp_file_path.into())

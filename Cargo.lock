@@ -498,6 +498,7 @@ dependencies = [
  "candid",
  "itertools",
  "serde",
+ "sha2",
  "tla_instrumentation_proc_macros",
  "tokio",
  "tokio-test",
