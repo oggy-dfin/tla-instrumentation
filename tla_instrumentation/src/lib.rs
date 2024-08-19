@@ -24,10 +24,8 @@ pub struct Update {
     /// "<canister_name>_to_destination" for requests and
     /// "destination_to_<canister_name>" for responses
     pub canister_name: String,
-    /// Extracts the constants from a pair of states
-    /// TODO: we could make this extract the contants from an entire trace,
-    /// possibly even over multiple updates.
-    pub constants_extractor: fn(&Vec<ResolvedStatePair>) -> TlaConstantAssignment,
+    /// Cleans up the trace and extracts the constants from it
+    pub post_process: fn(&mut Vec<ResolvedStatePair>) -> TlaConstantAssignment,
 }
 
 #[derive(Debug)]

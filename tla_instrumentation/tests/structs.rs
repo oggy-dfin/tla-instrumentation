@@ -16,6 +16,7 @@ use tla_instrumentation_proc_macros::tla_update_method;
 #[macro_use]
 mod tla_stuff {
     use crate::StructCanister;
+    use std::collections::BTreeSet;
 
     use candid::Nat;
 
@@ -56,7 +57,7 @@ mod tla_stuff {
             end_label: Label::new("End_Label"),
             process_id: PID.to_string(),
             canister_name: CAN_NAME.to_string(),
-            constants_extractor: |trace| {
+            post_process: |trace| {
                 let max_counter = trace
                     .iter()
                     .map(
@@ -73,6 +74,26 @@ mod tla_stuff {
                     "MAX_COUNTER".to_string(),
                     max_counter.unwrap_or(Nat::from(0_u64)).to_tla_value(),
                 )]);
+                let outgoing = format!("{}_to_{}", CAN_NAME, "othercan");
+                let outgoing = outgoing.as_str();
+                let incoming = format!("{}_to_{}", "othercan", CAN_NAME);
+                let incoming = incoming.as_str();
+                for pair in trace {
+                    for s in [&mut pair.start, &mut pair.end] {
+                        if !s.0 .0.contains_key(outgoing) {
+                            s.0 .0.insert(
+                                outgoing.to_string(),
+                                Vec::<TlaValue>::new().to_tla_value(),
+                            );
+                        }
+                        if !s.0 .0.contains_key(incoming) {
+                            s.0 .0.insert(
+                                incoming.to_string(),
+                                BTreeSet::<TlaValue>::new().to_tla_value(),
+                            );
+                        }
+                    }
+                }
                 TlaConstantAssignment { constants }
             },
         }
@@ -146,10 +167,17 @@ fn struct_test() {
         Some(BTreeMap::from([(PID, 1_u64)]).to_tla_value()).as_ref()
     );
 
+    let outgoing = format!("{}_to_{}", CAN_NAME, "othercan");
+    let outgoing = outgoing.as_str();
+    let incoming = format!("{}_to_{}", "othercan", CAN_NAME);
+    let incoming = incoming.as_str();
+
     assert_eq!(
-        first
-            .end
-            .get(format!("{}_to_{}", CAN_NAME, "othercan").as_str()),
+        first.start.get(outgoing),
+        Some(&Vec::<TlaValue>::new().to_tla_value())
+    );
+    assert_eq!(
+        first.end.get(outgoing),
         Some(
             &vec![TlaValue::Record(BTreeMap::from([
                 ("caller".to_string(), PID.to_tla_value()),
@@ -163,6 +191,15 @@ fn struct_test() {
             ]))]
             .to_tla_value()
         )
+    );
+
+    assert_eq!(
+        first.start.get(incoming),
+        Some(&BTreeSet::<TlaValue>::new().to_tla_value())
+    );
+    assert_eq!(
+        first.end.get(incoming),
+        Some(&BTreeSet::<TlaValue>::new().to_tla_value())
     );
 
     let second = &pairs[1];
@@ -180,9 +217,7 @@ fn struct_test() {
     );
 
     assert_eq!(
-        second
-            .start
-            .get(format!("{}_to_{}", "othercan", CAN_NAME).as_str()),
+        second.start.get(incoming),
         Some(
             &BTreeSet::from([TlaValue::Record(BTreeMap::from([
                 ("caller".to_string(), PID.to_tla_value()),
@@ -190,5 +225,18 @@ fn struct_test() {
             ]))])
             .to_tla_value()
         )
+    );
+    assert_eq!(
+        second.end.get(incoming),
+        Some(&BTreeSet::<TlaValue>::new().to_tla_value())
+    );
+
+    assert_eq!(
+        second.start.get(outgoing),
+        Some(&Vec::<TlaValue>::new().to_tla_value())
+    );
+    assert_eq!(
+        second.end.get(outgoing),
+        Some(&Vec::<TlaValue>::new().to_tla_value())
     );
 }
