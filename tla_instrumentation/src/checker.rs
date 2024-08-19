@@ -1,7 +1,6 @@
 // use ic_state_machine_tests::StateMachine;
 // use ic_test_utilities_load_wasm::load_wasm;
 use std::collections::HashMap;
-use std::env;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -14,9 +13,15 @@ pub trait HasTlaRepr {
 }
 
 #[derive(Debug)]
-pub enum TlaCheckError {
-    ApalacheError(String),
+pub enum ApalacheError {
+    CheckFailed(String),
     SetupError(String),
+}
+
+pub struct TlaCheckError {
+    pub apalache_error: ApalacheError,
+    pub pair: ResolvedStatePair,
+    pub constants: TlaConstantAssignment,
 }
 
 const INIT_PREDICATE_NAME: &str = "Check_Code_Link_Init";
@@ -74,7 +79,7 @@ fn run_apalache(
     tla_module: &Path,
     init_predicate: String,
     next_predicate: String,
-) -> Result<(), TlaCheckError> {
+) -> Result<(), ApalacheError> {
     let mut cmd = Command::new(apalache_binary);
     cmd.arg("check")
         .arg(format!("--init={}", init_predicate))
@@ -82,12 +87,12 @@ fn run_apalache(
         .arg("--length=1")
         .arg(tla_module);
     cmd.status()
-        .map_err(|e| TlaCheckError::SetupError(e.to_string()))
+        .map_err(|e| ApalacheError::SetupError(e.to_string()))
         .and_then(|e| {
             if e.success() {
                 Ok(())
             } else {
-                Err(TlaCheckError::ApalacheError(
+                Err(ApalacheError::CheckFailed(
                     format!(
                         "When checking file\n{:?}\nApalache returned the error: {}",
                         tla_module, e
@@ -119,22 +124,27 @@ pub fn check_tla_code_link(
             .start
             .0
              .0
-            .into_iter()
-            .map(|(k, v)| (k, v.to_string()))
+            .iter()
+            .map(|(k, v)| (k.clone(), v.to_string()))
             .collect(),
         state_pair
             .end
             .0
              .0
-            .into_iter()
-            .map(|(k, v)| (k, v.to_string()))
+            .iter()
+            .map(|(k, v)| (k.clone(), v.to_string()))
             .collect(),
         constants
             .constants
-            .into_iter()
-            .map(|(k, v)| (k, v.to_string()))
+            .iter()
+            .map(|(k, v)| (k.clone(), v.to_string()))
             .collect(),
     )
+    .map_err(|e| TlaCheckError {
+        apalache_error: e,
+        pair: state_pair,
+        constants,
+    })
 }
 
 fn sha256_hex(input: Vec<u8>) -> String {
@@ -158,7 +168,7 @@ pub fn check_tla_code_link_raw(
     pre_state: HashMap<String, String>,
     post_state: HashMap<String, String>,
     constants: HashMap<String, String>,
-) -> Result<(), TlaCheckError> {
+) -> Result<(), ApalacheError> {
     // The strategy:
     // 1. Copy the given TLA+ to a temporary file in the same directory (so that module imports still work)
     // 2. In the temporary file, create new Init and Next relations (under a different name) as follows:
@@ -219,9 +229,7 @@ pub fn check_tla_code_link_raw(
         let new_module = format!("{}\n{}\n====", module_body, predicates.join("\n"));
         let temp_file_path = parent_dir.join(format!(
             "{}_{}_{}.tla",
-            new_module_prefix,
-            module_name,
-            new_module_suffix
+            new_module_prefix, module_name, new_module_suffix
         ));
         fs::write(temp_file_path.clone(), new_module).map_err(|e| e.to_string())?;
         Ok(temp_file_path.into())
@@ -236,7 +244,7 @@ pub fn check_tla_code_link_raw(
         vec![init_predicate, trans_predicate],
         constant_definitions,
     )
-    .map_err(|e| TlaCheckError::SetupError(e))?;
+    .map_err(|e| ApalacheError::SetupError(e))?;
     run_apalache(
         apalache,
         new_module.as_path(),
@@ -250,47 +258,6 @@ pub fn check_tla_code_link_raw(
 
 #[test]
 fn retrieve_btc() {}
-
-fn project_root() -> PathBuf {
-    // PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-    let test_srcdir = env::var("TEST_SRCDIR").expect("TEST_SRCDIR not set");
-    PathBuf::from(test_srcdir).join("ic")
-}
-fn get_apalache_path() -> PathBuf {
-    // TODO: figure out how to distribute Apalache properly for tests (ideally so it works with Cargo too?)
-    // project_root().join("tools/apalache/bin/apalache-mc")
-    project_root()
-        .join("external")
-        .join("tla_apalache")
-        .join("bin")
-        .join("apalache-mc")
-}
-
-// TODO: this is a temporary hack that uses the apalache binary relative to the current dir,
-// need to do something fancier for Bazel
-pub fn hacky_check_link(
-    tla_module_name_relative_path: &Path,
-    transition_predicate: String,
-    predicate_parameters: Vec<String>,
-    pre_state: HashMap<String, String>,
-    post_state: HashMap<String, String>,
-    constants: HashMap<String, String>,
-) -> Result<(), TlaCheckError> {
-    let apalache = get_apalache_path();
-    let tla_module = project_root()
-        .join("rs")
-        .join("tla_code_link_poc")
-        .join(tla_module_name_relative_path);
-    check_tla_code_link_raw(
-        &apalache,
-        &tla_module,
-        transition_predicate,
-        predicate_parameters,
-        pre_state,
-        post_state,
-        constants,
-    )
-}
 
 #[cfg(test)]
 impl HasTlaRepr for TlaCounterState {
