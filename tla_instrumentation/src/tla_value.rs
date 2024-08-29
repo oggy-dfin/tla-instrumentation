@@ -1,5 +1,4 @@
 use candid::{CandidType, Nat, Principal};
-use itertools::join;
 use serde::Deserialize;
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::{
@@ -24,20 +23,23 @@ impl Display for TlaValue {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         match self {
             TlaValue::Set(set) => {
-                let elements = set.iter().map(|x| format!("{}", x));
-                write!(f, "{{{}}}", join(elements, ", "))
+                let elements: Vec<_> = set.iter().map(|x| format!("{}", x)).collect();
+                write!(f, "{{{}}}", elements.join(", "))
             }
             TlaValue::Record(map) => {
-                let elements = map.iter().map(|(k, v)| format!("{} |-> {}", k, v));
-                write!(f, "[{}]", join(elements, ", "))
+                let elements: Vec<_> = map
+                    .iter()
+                    .map(|(k, v)| format!("{} |-> {}", k, v))
+                    .collect();
+                write!(f, "[{}]", elements.join(", "))
             }
             TlaValue::Function(map) => {
-                let elements = map.iter().map(|(k, v)| format!("{} :> {}", k, v));
-                write!(f, "({})", join(elements, " @@ "))
+                let elements: Vec<_> = map.iter().map(|(k, v)| format!("{} :> {}", k, v)).collect();
+                write!(f, "({})", elements.join(" @@ "))
             }
             TlaValue::Seq(vec) => {
-                let elements = vec.iter().map(|x| format!("{}", x));
-                write!(f, "<<{}>>", join(elements, ", "))
+                let elements: Vec<_> = vec.iter().map(|x| format!("{}", x)).collect();
+                write!(f, "<<{}>>", elements.join(", "))
             }
             TlaValue::Literal(s) => write!(f, "\"{}\"", s),
             TlaValue::Constant(s) => write!(f, "{}", s),
