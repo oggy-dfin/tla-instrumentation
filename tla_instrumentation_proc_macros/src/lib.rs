@@ -115,8 +115,8 @@ pub fn tla_update_method(attr: TokenStream, item: TokenStream) -> TokenStream {
 
             #(#attrs)* #vis #sig {
                 // Fail the compilation if we're not in debug mode
-                #[cfg(not(debug_assertions))]
-                let i:u32 = "abc";
+                // #[cfg(not(debug_assertions))]
+                // let i:u32 = "abc";
 
                 use std::cell::RefCell;
                 use std::rc::Rc;
