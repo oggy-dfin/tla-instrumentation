@@ -23,12 +23,12 @@ mod tla_stuff {
     pub const PID: &str = "My_F_PID";
     pub const CAN_NAME: &str = "mycan";
 
+    use local_key::task_local;
     use std::{collections::BTreeMap, sync::RwLock};
     use tla_instrumentation::{
         GlobalState, InstrumentationState, Label, TlaConstantAssignment, TlaValue, ToTla, Update,
         UpdateTrace, VarAssignment,
     };
-    use tokio::task_local;
 
     task_local! {
         pub static TLA_INSTRUMENTATION_STATE: InstrumentationState;
